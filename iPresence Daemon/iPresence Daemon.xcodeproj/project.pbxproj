@@ -1,0 +1,315 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		9DAB9D5C2F18732100ED66EE /* Bootstrap.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D422F18732100ED66EE /* Bootstrap.m */; };
+		9DAB9D5D2F18732100ED66EE /* Core.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D442F18732100ED66EE /* Core.m */; };
+		9DAB9D5E2F18732100ED66EE /* DCServerCommunicator.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D462F18732100ED66EE /* DCServerCommunicator.m */; };
+		9DAB9D5F2F18732100ED66EE /* Logger.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D482F18732100ED66EE /* Logger.m */; };
+		9DAB9D602F18732100ED66EE /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D492F18732100ED66EE /* main.m */; };
+		9DAB9D612F18732100ED66EE /* PresenceUpdater.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D4B2F18732100ED66EE /* PresenceUpdater.m */; };
+		9DAB9D622F18732100ED66EE /* Tools.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D4D2F18732100ED66EE /* Tools.m */; };
+		9DAB9D632F18732100ED66EE /* UserPreferences.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D4F2F18732100ED66EE /* UserPreferences.m */; };
+		9DAB9D642F18732100ED66EE /* NSString+Base64.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D522F18732100ED66EE /* NSString+Base64.m */; };
+		9DAB9D652F18732100ED66EE /* WSFrame.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D542F18732100ED66EE /* WSFrame.m */; };
+		9DAB9D662F18732100ED66EE /* WSMessage.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D562F18732100ED66EE /* WSMessage.m */; };
+		9DAB9D672F18732100ED66EE /* WSMessageProcessor.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D582F18732100ED66EE /* WSMessageProcessor.m */; };
+		9DAB9D682F18732100ED66EE /* WSWebSocket.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D5B2F18732100ED66EE /* WSWebSocket.m */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		9DAB9D332F18729B00ED66EE /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		9DAB9D352F18729B00ED66EE /* iPresence Daemon */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "iPresence Daemon"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9DAB9D412F18732100ED66EE /* Bootstrap.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Bootstrap.h; sourceTree = "<group>"; };
+		9DAB9D422F18732100ED66EE /* Bootstrap.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Bootstrap.m; sourceTree = "<group>"; };
+		9DAB9D432F18732100ED66EE /* Core.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Core.h; sourceTree = "<group>"; };
+		9DAB9D442F18732100ED66EE /* Core.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Core.m; sourceTree = "<group>"; };
+		9DAB9D452F18732100ED66EE /* DCServerCommunicator.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DCServerCommunicator.h; sourceTree = "<group>"; };
+		9DAB9D462F18732100ED66EE /* DCServerCommunicator.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = DCServerCommunicator.m; sourceTree = "<group>"; };
+		9DAB9D472F18732100ED66EE /* Logger.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Logger.h; sourceTree = "<group>"; };
+		9DAB9D482F18732100ED66EE /* Logger.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Logger.m; sourceTree = "<group>"; };
+		9DAB9D492F18732100ED66EE /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		9DAB9D4A2F18732100ED66EE /* PresenceUpdater.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PresenceUpdater.h; sourceTree = "<group>"; };
+		9DAB9D4B2F18732100ED66EE /* PresenceUpdater.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PresenceUpdater.m; sourceTree = "<group>"; };
+		9DAB9D4C2F18732100ED66EE /* Tools.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Tools.h; sourceTree = "<group>"; };
+		9DAB9D4D2F18732100ED66EE /* Tools.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Tools.m; sourceTree = "<group>"; };
+		9DAB9D4E2F18732100ED66EE /* UserPreferences.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = UserPreferences.h; sourceTree = "<group>"; };
+		9DAB9D4F2F18732100ED66EE /* UserPreferences.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = UserPreferences.m; sourceTree = "<group>"; };
+		9DAB9D512F18732100ED66EE /* NSString+Base64.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "NSString+Base64.h"; sourceTree = "<group>"; };
+		9DAB9D522F18732100ED66EE /* NSString+Base64.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = "NSString+Base64.m"; sourceTree = "<group>"; };
+		9DAB9D532F18732100ED66EE /* WSFrame.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WSFrame.h; sourceTree = "<group>"; };
+		9DAB9D542F18732100ED66EE /* WSFrame.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WSFrame.m; sourceTree = "<group>"; };
+		9DAB9D552F18732100ED66EE /* WSMessage.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WSMessage.h; sourceTree = "<group>"; };
+		9DAB9D562F18732100ED66EE /* WSMessage.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WSMessage.m; sourceTree = "<group>"; };
+		9DAB9D572F18732100ED66EE /* WSMessageProcessor.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WSMessageProcessor.h; sourceTree = "<group>"; };
+		9DAB9D582F18732100ED66EE /* WSMessageProcessor.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WSMessageProcessor.m; sourceTree = "<group>"; };
+		9DAB9D592F18732100ED66EE /* WSWebSocket-Prefix.pch */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "WSWebSocket-Prefix.pch"; sourceTree = "<group>"; };
+		9DAB9D5A2F18732100ED66EE /* WSWebSocket.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = WSWebSocket.h; sourceTree = "<group>"; };
+		9DAB9D5B2F18732100ED66EE /* WSWebSocket.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = WSWebSocket.m; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9DAB9D322F18729B00ED66EE /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9DAB9D2C2F18729B00ED66EE = {
+			isa = PBXGroup;
+			children = (
+				9DAB9D372F18729B00ED66EE /* iPresence Daemon */,
+				9DAB9D362F18729B00ED66EE /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9DAB9D362F18729B00ED66EE /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9DAB9D352F18729B00ED66EE /* iPresence Daemon */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9DAB9D372F18729B00ED66EE /* iPresence Daemon */ = {
+			isa = PBXGroup;
+			children = (
+				9DAB9D412F18732100ED66EE /* Bootstrap.h */,
+				9DAB9D422F18732100ED66EE /* Bootstrap.m */,
+				9DAB9D432F18732100ED66EE /* Core.h */,
+				9DAB9D442F18732100ED66EE /* Core.m */,
+				9DAB9D452F18732100ED66EE /* DCServerCommunicator.h */,
+				9DAB9D462F18732100ED66EE /* DCServerCommunicator.m */,
+				9DAB9D472F18732100ED66EE /* Logger.h */,
+				9DAB9D482F18732100ED66EE /* Logger.m */,
+				9DAB9D492F18732100ED66EE /* main.m */,
+				9DAB9D4A2F18732100ED66EE /* PresenceUpdater.h */,
+				9DAB9D4B2F18732100ED66EE /* PresenceUpdater.m */,
+				9DAB9D4C2F18732100ED66EE /* Tools.h */,
+				9DAB9D4D2F18732100ED66EE /* Tools.m */,
+				9DAB9D4E2F18732100ED66EE /* UserPreferences.h */,
+				9DAB9D4F2F18732100ED66EE /* UserPreferences.m */,
+				9DAB9D502F18732100ED66EE /* Websocket */,
+			);
+			path = "iPresence Daemon";
+			sourceTree = "<group>";
+		};
+		9DAB9D502F18732100ED66EE /* Websocket */ = {
+			isa = PBXGroup;
+			children = (
+				9DAB9D512F18732100ED66EE /* NSString+Base64.h */,
+				9DAB9D522F18732100ED66EE /* NSString+Base64.m */,
+				9DAB9D532F18732100ED66EE /* WSFrame.h */,
+				9DAB9D542F18732100ED66EE /* WSFrame.m */,
+				9DAB9D552F18732100ED66EE /* WSMessage.h */,
+				9DAB9D562F18732100ED66EE /* WSMessage.m */,
+				9DAB9D572F18732100ED66EE /* WSMessageProcessor.h */,
+				9DAB9D582F18732100ED66EE /* WSMessageProcessor.m */,
+				9DAB9D592F18732100ED66EE /* WSWebSocket-Prefix.pch */,
+				9DAB9D5A2F18732100ED66EE /* WSWebSocket.h */,
+				9DAB9D5B2F18732100ED66EE /* WSWebSocket.m */,
+			);
+			path = Websocket;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9DAB9D342F18729B00ED66EE /* iPresence Daemon */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9DAB9D3E2F18729B00ED66EE /* Build configuration list for PBXNativeTarget "iPresence Daemon" */;
+			buildPhases = (
+				9DAB9D312F18729B00ED66EE /* Sources */,
+				9DAB9D322F18729B00ED66EE /* Frameworks */,
+				9DAB9D332F18729B00ED66EE /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "iPresence Daemon";
+			productName = "iPresence Daemon";
+			productReference = 9DAB9D352F18729B00ED66EE /* iPresence Daemon */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9DAB9D2D2F18729B00ED66EE /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0510;
+				ORGANIZATIONNAME = kainograze;
+			};
+			buildConfigurationList = 9DAB9D302F18729B00ED66EE /* Build configuration list for PBXProject "iPresence Daemon" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+			);
+			mainGroup = 9DAB9D2C2F18729B00ED66EE;
+			productRefGroup = 9DAB9D362F18729B00ED66EE /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9DAB9D342F18729B00ED66EE /* iPresence Daemon */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		9DAB9D312F18729B00ED66EE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9DAB9D642F18732100ED66EE /* NSString+Base64.m in Sources */,
+				9DAB9D622F18732100ED66EE /* Tools.m in Sources */,
+				9DAB9D602F18732100ED66EE /* main.m in Sources */,
+				9DAB9D5D2F18732100ED66EE /* Core.m in Sources */,
+				9DAB9D662F18732100ED66EE /* WSMessage.m in Sources */,
+				9DAB9D682F18732100ED66EE /* WSWebSocket.m in Sources */,
+				9DAB9D5C2F18732100ED66EE /* Bootstrap.m in Sources */,
+				9DAB9D5E2F18732100ED66EE /* DCServerCommunicator.m in Sources */,
+				9DAB9D632F18732100ED66EE /* UserPreferences.m in Sources */,
+				9DAB9D612F18732100ED66EE /* PresenceUpdater.m in Sources */,
+				9DAB9D5F2F18732100ED66EE /* Logger.m in Sources */,
+				9DAB9D672F18732100ED66EE /* WSMessageProcessor.m in Sources */,
+				9DAB9D652F18732100ED66EE /* WSFrame.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		9DAB9D3C2F18729B00ED66EE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		9DAB9D3D2F18729B00ED66EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 10.9;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		9DAB9D3F2F18729B00ED66EE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos7.1;
+			};
+			name = Debug;
+		};
+		9DAB9D402F18729B00ED66EE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos7.1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9DAB9D302F18729B00ED66EE /* Build configuration list for PBXProject "iPresence Daemon" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9DAB9D3C2F18729B00ED66EE /* Debug */,
+				9DAB9D3D2F18729B00ED66EE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		9DAB9D3E2F18729B00ED66EE /* Build configuration list for PBXNativeTarget "iPresence Daemon" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9DAB9D3F2F18729B00ED66EE /* Debug */,
+				9DAB9D402F18729B00ED66EE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9DAB9D2D2F18729B00ED66EE /* Project object */;
+}

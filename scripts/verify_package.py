@@ -152,7 +152,7 @@ def verify_binaries(root):
         for architecture in sorted(architectures):
             commands = output('xcrun', 'otool', '-arch', architecture, '-l', path).decode()
             validate_load_commands(commands, relative, architecture)
-        if relative in (f'{APP}/iPresence', DAEMON):
+        if relative == DAEMON:
             require('@rpath/discord_partner_sdk.framework/discord_partner_sdk' in commands, 'Missing SDK dependency')
             require('path /var/jb/Library/Frameworks (offset' in commands, 'Missing rootless framework search path')
         # ldid signatures are jailbreak signatures, not Apple distribution signatures.

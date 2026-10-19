@@ -48,6 +48,8 @@ def main():
         object_dir = BUILD / 'objects' / name
         object_dir.mkdir(parents=True, exist_ok=True)
         sources = sorted(source.glob('*.m')) + sorted(source.glob('*.mm')) + [ROOT / 'shared/IPOAuthStore.m']
+        if name == 'app':
+            sources += [ROOT / 'shared/IPAuthorizationAttempt.m', ROOT / 'shared/IPDiscordOAuthRequest.m']
         for unit in sources:
             obj = object_dir / (unit.name + '.o')
             flags = ['-std=c++20'] if unit.suffix == '.mm' else []
@@ -58,10 +60,10 @@ def main():
         run('xcrun', '--sdk', 'iphoneos', 'clang++', '-isysroot', sdk,
             '-miphoneos-version-min=15.1', '-arch', 'arm64', *objects,
             '-framework', 'Foundation', '-framework', 'CoreFoundation',
-            '-F', framework_source.parent, '-framework', 'discord_partner_sdk',
-            '-Wl,-rpath,/var/jb/Library/Frameworks',
+            *(['-F', framework_source.parent, '-framework', 'discord_partner_sdk',
+               '-Wl,-rpath,/var/jb/Library/Frameworks'] if name == 'daemon' else []),
             *[part for item in extra_frameworks for part in ('-framework', item)], '-o', destination)
-    build_client('app', app_source, app / 'iPresence', ('UIKit', 'AuthenticationServices'))
+    build_client('app', app_source, app / 'iPresence', ('UIKit', 'AuthenticationServices', 'Security'))
     build_client('daemon', daemon_source, daemon, ('UIKit',))
     run(*common, '-arch', 'arm64', '-arch', 'arm64e', '-dynamiclib',
         '-Wl,-install_name,@rpath/iPresenceHelper.dylib',

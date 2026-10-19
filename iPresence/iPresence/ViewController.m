@@ -14,6 +14,7 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
 @property(nonatomic, strong) UISwitch *versionSwitch;
 @property(nonatomic, strong) UIButton *signInButton;
 @property(nonatomic, strong) UIButton *signOutButton;
+@property(nonatomic, strong) UIButton *cancelSignInButton;
 @property(nonatomic, strong) UILabel *accountLabel;
 @property(nonatomic, strong) UILabel *statusLabel;
 @end
@@ -57,15 +58,18 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     self.signOutButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.signOutButton setTitle:@"Sign out" forState:UIControlStateNormal];
     [self.signOutButton addTarget:self action:@selector(signOut) forControlEvents:UIControlEventTouchUpInside];
+    self.cancelSignInButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.cancelSignInButton setTitle:@"Cancel sign-in" forState:UIControlStateNormal];
+    [self.cancelSignInButton addTarget:self action:@selector(cancelSignIn) forControlEvents:UIControlEventTouchUpInside];
     self.statusLabel = [self label:@"Sign in, then enable activity sharing when you’re ready." style:UIFontTextStyleFootnote];
     self.statusLabel.textColor = UIColor.secondaryLabelColor;
     UILabel *description = [self label:@"Share your music activity with Discord." style:UIFontTextStyleTitle2];
-    UILabel *notice = [self label:@"Sign-in uses Discord’s authorization screen. OAuth credentials are stored privately on this device. You control sharing and can sign out at any time." style:UIFontTextStyleFootnote];
+    UILabel *notice = [self label:@"Discord’s minimum presence permission bundle also includes friend and relationship access. iPresence uses it to publish listening activity and does not use friend features. It does not request message, voice, email, or server access. Review Discord’s permissions before approving; you can cancel or revoke access at any time." style:UIFontTextStyleFootnote];
     notice.textColor = UIColor.secondaryLabelColor;
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
-        description, self.accountLabel, self.signInButton, self.signOutButton,
+        description, self.accountLabel, notice, self.signInButton, self.cancelSignInButton, self.signOutButton,
         [self row:@"Share listening activity" toggle:self.enabledSwitch],
-        [self row:@"Show iOS version" toggle:self.versionSwitch], self.statusLabel, notice
+        [self row:@"Show iOS version" toggle:self.versionSwitch], self.statusLabel
     ]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 24;
@@ -91,6 +95,7 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
         if (![self persistPreferences]) self.statusLabel.text = @"Could not remove the old settings. Reinstall the rootless package and reopen iPresence.";
     }
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateAccount) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateAccount) name:IPDiscordAuthorizationStateDidChangeNotification object:nil];
 }
 
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
@@ -98,11 +103,13 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
 - (void)updateAccount {
     BOOL signedIn = [IPOAuthStore credentials] != nil;
     BOOL busy = IPDiscordAuthorization.sharedInstance.busy;
+    if (busy) self.statusLabel.text = IPDiscordAuthorization.sharedInstance.progressMessage;
     self.accountLabel.text = signedIn ? @"Signed in with Discord" : @"Not signed in";
     [self.signInButton setTitle:signedIn ? @"Sign in again with Discord" : @"Sign in with Discord" forState:UIControlStateNormal];
     self.signInButton.enabled = !busy;
     self.signOutButton.hidden = !signedIn;
     self.signOutButton.enabled = !busy;
+    self.cancelSignInButton.hidden = !IPDiscordAuthorization.sharedInstance.canCancelSignIn;
     self.enabledSwitch.enabled = signedIn && !busy;
     self.versionSwitch.enabled = !busy;
     if (!signedIn) self.enabledSwitch.on = NO;
@@ -180,5 +187,8 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
         weakSelf.statusLabel.text = settingsSaved ? message : @"Sign-out requested, but settings could not be saved. Reopen the rootless installation to check your account.";
     }];
     [self updateAccount];
+}
+- (void)cancelSignIn {
+    [IPDiscordAuthorization.sharedInstance cancelSignIn];
 }
 @end

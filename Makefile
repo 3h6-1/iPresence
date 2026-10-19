@@ -12,5 +12,7 @@ test:
 	bash tests/run-daemon-tests.sh
 	bash tests/run-helper-tests.sh
 	bash tests/run-oauth-store-tests.sh
+	bash tests/run-authorization-attempt-tests.sh
+	bash tests/run-oauth-request-tests.sh
 clean:
 	python3 -c 'import shutil; shutil.rmtree("build", ignore_errors=True)'

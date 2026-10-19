@@ -29,10 +29,13 @@ that background authentication works on a physical device.
 
 **Local validation (2026-10-19):** the package builds and passes archive/Mach-O
 verification with Xcode 27.1 and the iPhoneOS 27.1 SDK. Nine packaging tests,
-68 offline daemon checks, 121 credential-store checks, and the media-helper
-regression suite pass. The UI and SDK callback loop launch in the iOS 18.5
-simulator; a separate headless simulator SDK initialization probe also exits
-successfully. These checks do not perform Discord authentication or publication.
+68 offline daemon checks, 121 credential-store checks, 65 OAuth request checks,
+37 authorization lifecycle checks, and the media-helper regression suite pass.
+All 12 optional iOS simulator scenarios pass, exercising the production callback
+handlers and UI with a mock browser and HTTP responses. They cover successful sign-in,
+cancellation, timeout, denial, server errors, forged/duplicate callbacks, and
+retry after cancellation. These checks do not perform real Discord authentication,
+external browser handoff, or activity publication.
 
 The package does not provide a jailbreak. Check the actual device and OS support
 of [Dopamine](https://github.com/opa334/Dopamine) or
@@ -57,17 +60,26 @@ make test
 make package
 ```
 
-Output: `packages/com.kainograze.ipresence_2.1.0~oauth1_iphoneos-arm64.deb`.
+Output: `packages/com.kainograze.ipresence_2.1.1~oauth2_iphoneos-arm64.deb`.
 The SDK runtime is signed and installed at
-`/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the app and daemon
-use that rootless framework search path. SDK notices are included in the local
-package. SDK headers and libraries stay under ignored `vendor/`.
+`/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the daemon uses
+that rootless framework search path. The foreground app uses
+iOS AuthenticationServices and Foundation networking for OAuth; it does not load
+the Social SDK or depend on its implicit URL hooks. SDK notices are included in the
+local package. SDK headers and libraries stay under ignored `vendor/`.
 
 `make build` stages signed payloads, `make verify` inspects the actual `.deb`,
 and `make clean` removes build output. Compilation treats warnings as errors.
 Verification checks archive permissions, architecture, platform, deployment
 target, signatures, entitlements, launchd configuration, OAuth URL scheme, and
 SDK linkage. Host tests do not need the SDK or any Discord credentials.
+
+To run the optional offline iOS integration fixture, select an installed simulator
+from `xcrun simctl list devices available`, then run
+`bash tests/run-authorization-simulator-tests.sh <simulator-UDID>`. It installs a
+separate test app with synthetic credentials and removes it afterward. It only
+shuts down the selected simulator if it booted it. Results and UI screenshots
+are saved under `build/auth-routing/`.
 
 `ci/build.yml` is an inactive host-test workflow template. It needs a credential
 with workflow-write permission to install under `.github/workflows/`. Package
@@ -85,16 +97,31 @@ discord-1561870047562043402:/authorize/callback
 
 For another maintained fork, use your own Discord application and change the ID,
 redirect, URL scheme, and artwork URL together in the app, daemon, and tests.
-Never embed a client secret in an iPhone app. The requested scopes are only
-`openid sdk.social_layer_presence`; no message, server, or friend-list access
-is requested.
+Never embed a client secret in an iPhone app. The requested scopes are pinned
+to `openid sdk.social_layer_presence`, the
+minimum documented for authenticated Social SDK Rich Presence. **This is a
+bundle: Discord also grants friend/relationship features.** iPresence does not
+use those features, but we cannot remove them from Discord's bundle while
+retaining this supported iPhone-only integration. No extra communication,
+message, voice, email, or server scopes are requested. The app explains this
+before opening sign-in; Discord's own consent screen lists the actual access.
+
+See [Discord's scope documentation](https://docs.discord.com/developers/discord-social-sdk/core-concepts/oauth2-scopes)
+for the features included in each permission bundle.
+
+Version 2.1.1 owns OAuth through `ASWebAuthenticationSession` and explicitly
+handles UIKit callback URLs. It checks a random state value, uses S256 PKCE,
+exchanges the code once, and rejects old/forged callbacks. Sign-in has a Cancel
+button and a five-minute deadline; token exchange has a 45-second recovery
+limit. Network requests use default TLS validation, disable caching and cookies,
+and refuse HTTP redirects. No client secret or personal account token is used.
 
 ## Install and use
 
 1. Transfer the local `.deb` to a supported rootless device and open it in Sileo
    or Zebra. Let the package manager resolve dependencies, then respring.
-2. Open **iPresence**, choose **Sign in with Discord**, and approve the presence
-   permission in Discord's own login/consent screen.
+2. Open **iPresence**, choose **Sign in with Discord**, and review the bundled permissions
+   in Discord's own login/consent screen.
 3. Enable **Share listening activity** and play music; changes save automatically. No Mac or desktop
    Discord client is needed. “Signed in” in the app means credentials were saved;
    confirm actual publication by viewing your Discord activity.

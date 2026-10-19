@@ -1,6 +1,6 @@
 Package: com.kainograze.ipresence
 Name: iPresence
-Version: 2.0.0~rootless1
+Version: 2.0.1~rootless1
 Architecture: iphoneos-arm64
 Description: Music presence for Discord on rootless iOS 15-26.0.1
  Includes the settings app, background daemon and SpringBoard media helper.

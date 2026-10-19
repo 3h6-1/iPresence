@@ -20,10 +20,12 @@ support restrictions, or support RootHide's different package format.
 | Debian package | `iphoneos-arm64` | firmware 15.0 through 26.0.1 |
 
 **Validation status (2026-10-19):** built and verified with Xcode 27.1 / iPhoneOS
-27.1 SDK, targeting iOS 15.0. All 53 offline daemon checks, the media-helper
+27.1 SDK, targeting iOS 15.0. All 58 offline daemon checks, the media-helper
 regression suite, and nine packaging tests passed. The settings app also passed
 a launch/layout smoke test in the iOS 18.5 iPhone 16 Pro simulator. No physical
-iOS device was available for this port.
+iOS device was available for local testing. The user has since confirmed that
+the initial build publishes activity successfully on their device; its exact
+model, OS, and jailbreak were not recorded.
 Installation, MediaRemote behavior, tweak injection, and end-to-end Discord
 presence on each OS/jailbreak combination still require the device checks below.
 A successful build is not a claim that every listed OS/device combination has
@@ -48,7 +50,7 @@ make package
 ```
 
 The result is
-`packages/com.kainograze.ipresence_2.0.0~rootless1_iphoneos-arm64.deb`.
+`packages/com.kainograze.ipresence_2.0.1~rootless1_iphoneos-arm64.deb`.
 `make build` stages signed payloads without making a package; `make verify`
 inspects the existing `.deb`. `make clean` removes the staging/build directory.
 Builds compile with warnings treated as errors. The retired `Websocket/`
@@ -100,11 +102,57 @@ writes settings atomically with mode `0600`, masks token entry, and the daemon
 never logs credentials or Gateway payloads. Other software running as mobile or
 root on the jailbroken device can still read the file.
 
+## Activity artwork
+
+Version 2.0.1 sends the supplied red/pink Apple Music image explicitly in
+`assets.large_image`, hosted at this fork's public HTTPS image URL. The previous
+payload only supplied an image tooltip, so Discord fell back to the original
+Discord application's orange icon. Changing the installed iOS app's icon alone
+would not change this artwork. See [artwork provenance](assets/README.md).
+
+The activity now uses the owner's new **iPresence** Discord application
+(`1561870047562043402`), whose default icon was also updated in the Developer
+Portal. This replaces the old application's fallback branding. The explicit
+activity image follows Discord's documented
+[external image URL format](https://docs.discord.com/developers/events/gateway-events#activity-object-activity-asset-image).
+
+## Removing personal account tokens (iPhone only)
+
+**The 2.0.1 artwork update still uses the existing personal-token connection.**
+It does not remove the self-bot policy risk described above.
+
+The supported authentication approach to investigate next is the native
+Discord Social SDK with OAuth2 account linking and PKCE. Users authorize a
+limited scope in Discord's consent screen instead of pasting their personal
+session token. OAuth access and refresh tokens still exist internally; they
+must be stored securely and refreshed by a single process.
+
+Prerequisites:
+
+1. A Discord application owned by the project maintainer, with Social SDK
+   enabled through the Developer Portal.
+2. The official C++ SDK download containing `discord_partner_sdk.xcframework`.
+3. Public-client OAuth configuration and its registered mobile redirect URI.
+4. iOS 15.1 or newer for the current Social SDK. The artwork-only package retains
+   the existing iOS 15.0 deployment target.
+
+The SDK is not bundled and OAuth is not implemented in this build. Discord
+supports unauthenticated Rich Presence on desktop/Android, **not iOS**, so a
+phone-only solution cannot simply omit authentication. A headless iOS daemon
+using the SDK also needs real-device background testing; official SDK platform
+support does not establish support for a jailbreak launch daemon. Using the
+official flow removes the raw-session-token mechanism, but is not a guarantee
+against any account action or a claim of Discord approval.
+
+References: [mobile account linking](https://docs.discord.com/developers/discord-social-sdk/development-guides/account-linking-on-mobile),
+[platform support](https://docs.discord.com/developers/discord-social-sdk/core-concepts/platform-compatibility),
+[Rich Presence authentication](https://docs.discord.com/developers/discord-social-sdk/development-guides/setting-rich-presence#rich-presence-without-authentication).
+
 ## Device validation checklist
 
 Run this on representative arm64 and arm64e devices for each OS range you intend
 to distribute to. Record device model, OS build, jailbreak version, package
-version, and the results; **all device rows are currently unverified**.
+version, and the results; **a per-version device matrix has not yet been recorded**.
 
 - Install/upgrade/remove through the package manager. Confirm the app appears,
   launches after a respring, and the daemon runs as mobile without a crash loop.

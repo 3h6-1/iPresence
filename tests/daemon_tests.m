@@ -128,8 +128,14 @@ static void TestPresence(void) {
     PresenceUpdater *updater = [PresenceUpdater new];
     updater.currentState = @{@"musicIsPlaying": @YES, @"metadata": @{@"title": @42, @"artist": NSNull.null, @"start": @1}};
     NSDictionary *activity = [updater generateValidActivityJson];
+    CHECK([activity[@"application_id"] isEqual:@"1561870047562043402"], "Activity uses the user's iPresence application with the updated fallback icon");
     CHECK([activity[@"details"] isEqual:@"Unknown Song"], "Invalid metadata types use safe defaults");
     CHECK(activity[@"timestamps"] == nil, "Missing end timestamp is omitted");
+    NSString *artworkURL = activity[@"assets"][@"large_image"];
+    CHECK([artworkURL isEqual:@"https://raw.githubusercontent.com/3h6-1/iPresence/main/assets/apple-music-ios26.webp"], "Activity explicitly selects the supplied red/pink Apple Music artwork");
+    NSURL *artwork = [NSURL URLWithString:artworkURL];
+    CHECK([artwork.scheme isEqual:@"https"] && artwork.host.length && !artwork.user && !artwork.password, "Artwork is a public HTTPS URL without embedded credentials");
+    CHECK([activity[@"assets"][@"large_text"] isEqual:@"on iOS · iPresence"], "Explicit artwork preserves the iPresence tooltip");
     updater.currentState = @{@"metadata": @{@"start": @2000, @"end": @1000}};
     CHECK([updater generateValidActivityJson][@"timestamps"] == nil, "Reversed timestamps are omitted");
     updater.currentState = @{@"metadata": @{@"start": @1000, @"end": @2000}};
@@ -151,6 +157,7 @@ static void TestPresence(void) {
     [updater setValue:@0 forKey:@"lastSendTime"];
     [updater.presenceCooldownTimer fire];
     CHECK(sends == 2 && [lastActivity[@"details"] isEqual:@"New Track"], "Cooldown publishes most recent playback");
+    CHECK([lastActivity[@"assets"][@"large_image"] isEqual:artworkURL], "Coalesced playback update retains the Apple Music artwork");
     [updater jsonSender];
     CHECK(sends == 2, "Unchanged 30-second helper heartbeat does not republish");
     [updater sleep:nil];

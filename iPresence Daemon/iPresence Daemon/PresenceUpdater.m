@@ -2,6 +2,9 @@
 #import "UserPreferences.h"
 #import <math.h>
 
+// Use the supplied Apple Music artwork in the Rich Presence activity.
+static NSString *const IPAppleMusicArtworkURL = @"https://raw.githubusercontent.com/3h6-1/iPresence/main/assets/apple-music-ios26.webp";
+
 @interface PresenceUpdater ()
 @property (nonatomic) NSTimeInterval lastSendTime;
 @property (nonatomic, copy) NSDictionary *lastActivity;
@@ -67,12 +70,15 @@
     NSString *text = [UserPreferences.sharedInstance valOfDisplayIosVersion] && version.length ?
         [NSString stringWithFormat:@"on iOS %@ · iPresence", version] : @"on iOS · iPresence";
     NSMutableDictionary *activity = [@{
-        @"application_id": @"1460106321427955903",
+        @"application_id": @"1561870047562043402",
         @"name": [self trimString:artist toMaxLength:128],
         @"type": @2,
         @"details": [self trimString:title toMaxLength:128],
         @"state": [self trimString:[NSString stringWithFormat:@"%@ - %@", artist, album] toMaxLength:128],
-        @"assets": @{@"large_text": [self trimString:text toMaxLength:128]}
+        @"assets": @{
+            @"large_image": IPAppleMusicArtworkURL,
+            @"large_text": [self trimString:text toMaxLength:128]
+        }
     } mutableCopy];
     id start = metadata[@"start"], end = metadata[@"end"];
     if ([start isKindOfClass:NSNumber.class] && [end isKindOfClass:NSNumber.class] &&

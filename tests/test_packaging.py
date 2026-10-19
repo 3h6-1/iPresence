@@ -54,7 +54,7 @@ class PackageRegressionTests(unittest.TestCase):
         verify.validate_control(fields)
         self.assertIn('\n', fields['Description'])
         for field, value in (('Architecture', 'iphoneos-arm'), ('Architecture', 'iphoneos-arm64e'),
-                             ('Depends', 'firmware (>= 15.0), mobilesubstrate, uikittools')):
+                             ('Depends', 'firmware (>= 15.1), mobilesubstrate, uikittools')):
             modified = dict(fields, **{field: value})
             with self.subTest(field=field, value=value), self.assertRaises(verify.VerificationError):
                 verify.validate_control(modified)
@@ -64,10 +64,10 @@ class PackageRegressionTests(unittest.TestCase):
             verify.read_control('Architecture: iphoneos-arm64\nArchitecture: iphoneos-arm\n')
 
     def test_load_commands_reject_simulator_newer_minimum_and_unsigned_binary(self):
-        commands = 'cmd LC_BUILD_VERSION\ncmdsize 32\nplatform 2\nminos 15.0\nsdk 27.1\ncmd LC_CODE_SIGNATURE\ncmdsize 16\ndataoff 4096\ndatasize 1024\n'
+        commands = 'cmd LC_BUILD_VERSION\ncmdsize 32\nplatform 2\nminos 15.1\nsdk 27.1\ncmd LC_CODE_SIGNATURE\ncmdsize 16\ndataoff 4096\ndatasize 1024\n'
         verify.validate_load_commands(commands, 'helper', 'arm64e')
         mutations = (commands.replace('platform 2', 'platform 7'),
-                     commands.replace('minos 15.0', 'minos 26.0'),
+                     commands.replace('minos 15.1', 'minos 26.0'),
                      commands.replace('datasize 1024', 'datasize 0'),
                      commands + 'cmd LC_LOAD_DYLIB\ncmdsize 56\nname /Library/Frameworks/Legacy.framework/Legacy (offset 24)\n')
         for invalid in mutations:

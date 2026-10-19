@@ -6,7 +6,7 @@
 @property (nonatomic, copy) NSString *pathToSettings;
 + (instancetype)sharedInstance;
 - (void)settingsUpdated;
-- (NSString *)valOfToken;
+- (BOOL)valOfLinkedAccount;
 - (BOOL)valOfShowAsDiscordStatus;
 - (BOOL)valOfDisplayIosVersion;
 - (NSString *)valOfIosVersion;

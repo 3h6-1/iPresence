@@ -9,7 +9,7 @@
 }
 - (void)start {
     [UserPreferences sharedInstance];
-    [DCServerCommunicator sharedInstance];
+    [DCServerCommunicator.sharedInstance startCommunicator];
     [PresenceUpdater sharedInstance];
     [Core.sharedInstance start];
 }

@@ -4,124 +4,219 @@
 #import "UserPreferences.h"
 #import "Core.h"
 #import "Tools.h"
+#import "IPOAuthStore.h"
 
 static NSUInteger checks;
 #define CHECK(condition, message) do { checks++; if (!(condition)) { fprintf(stderr, "FAIL: %s\n", message); exit(1); } } while (0)
 
-@interface DCServerCommunicator (Testing)
-- (void)settingsChanged:(NSNotification *)notification;
-@end
-
-// No NSURLSession or external connection is created by these tests.
-@interface TestSocket : NSObject
-@property (nonatomic) NSInteger closeCode;
-@property (nonatomic) NSUInteger cancelCount;
-@end
-@implementation TestSocket
-- (void)cancelWithCloseCode:(NSURLSessionWebSocketCloseCode)code reason:(NSData *)reason {
-    self.closeCode = code;
-    self.cancelCount++;
+// The real credential store and iOS SDK are deliberately not linked into host tests.
+// No test can read the user's credentials or connect to Discord.
+static NSDictionary *storedCredentials;
+static BOOL failStoreWrite;
+static NSUInteger credentialWrites, credentialNotifications;
+@implementation IPOAuthStore
++ (NSDictionary *)credentials { return storedCredentials; }
++ (BOOL)saveCredentials:(NSDictionary *)credentials replacingSession:(NSString *)session error:(NSError **)error {
+    if (failStoreWrite || (session && ![storedCredentials[@"sessionID"] isEqual:session])) return NO;
+    credentialWrites++;
+    storedCredentials = [credentials copy];
+    return YES;
 }
++ (void)clearCredentials { storedCredentials = nil; }
++ (BOOL)clearCredentialsWithError:(NSError **)error { storedCredentials = nil; return YES; }
++ (BOOL)clearCredentialsIfSessionMatches:(NSString *)session {
+    if (![storedCredentials[@"sessionID"] isEqual:session]) return NO;
+    storedCredentials = nil;
+    return YES;
+}
++ (void)notifyChanged { credentialNotifications++; }
 @end
 
-@interface RecordingCommunicator : DCServerCommunicator
-@property (nonatomic, strong) NSMutableArray<NSDictionary *> *sent;
-@property (nonatomic) NSUInteger starts;
+@interface FakeSDK : NSObject <DCDiscordTransport>
+@property (nonatomic, copy) void (^statusChanged)(DCSocialSDKStatus, BOOL);
+@property (nonatomic, copy) void (^tokenExpiring)(void);
+@property (nonatomic, strong) NSMutableArray *tokenCompletions;
+@property (nonatomic, strong) NSMutableArray *refreshCompletions;
+@property (nonatomic, strong) NSMutableArray *activityCompletions;
+@property (nonatomic, strong) NSMutableArray *updatedTokens;
+@property (nonatomic, strong) NSMutableArray *refreshTokens;
+@property (nonatomic, strong) NSMutableArray *activities;
+@property (nonatomic) NSUInteger connects;
+@property (nonatomic) NSUInteger disconnects;
+@property (nonatomic) NSUInteger clears;
+@property (nonatomic) NSUInteger callbacks;
+@property (nonatomic) BOOL appliedOnlyPersistedTokens;
+- (void)completeToken:(NSUInteger)index error:(NSError *)error;
+- (void)completeRefresh:(NSUInteger)index tokens:(NSDictionary *)tokens error:(NSError *)error;
+- (void)completeActivity:(NSUInteger)index error:(NSError *)error;
 @end
-@implementation RecordingCommunicator
+@implementation FakeSDK
 - (instancetype)init {
-    if ((self = [super init])) _sent = [NSMutableArray new];
+    if ((self = [super init])) {
+        _tokenCompletions = [NSMutableArray new]; _refreshCompletions = [NSMutableArray new];
+        _activityCompletions = [NSMutableArray new]; _updatedTokens = [NSMutableArray new];
+        _refreshTokens = [NSMutableArray new];
+        _activities = [NSMutableArray new]; _appliedOnlyPersistedTokens = YES;
+    }
     return self;
 }
-- (void)sendJSON:(NSDictionary *)payload { [self.sent addObject:payload]; }
-- (void)startCommunicator { self.starts++; }
-@end
-
-static RecordingCommunicator *Client(void) {
-    RecordingCommunicator *client = [RecordingCommunicator new];
-    client.Active = YES;
-    client.state = DCConnectionStateConnecting;
-    client.websocket = (NSURLSessionWebSocketTask *)(id)[TestSocket new];
-    return client;
+- (void)runCallbacks { self.callbacks++; }
+- (void)updateAccessToken:(NSString *)token completion:(DCSDKCompletion)completion {
+    self.appliedOnlyPersistedTokens &= [storedCredentials[@"accessToken"] isEqual:token];
+    [self.updatedTokens addObject:token]; [self.tokenCompletions addObject:[completion copy]];
 }
+- (void)refreshToken:(NSString *)token completion:(DCSDKRefreshCompletion)completion {
+    [self.refreshTokens addObject:token]; [self.refreshCompletions addObject:[completion copy]];
+}
+- (void)connect { self.connects++; }
+- (void)disconnect { self.disconnects++; }
+- (void)clearPresence { self.clears++; }
+- (void)updateActivity:(NSDictionary *)activity completion:(DCSDKCompletion)completion {
+    [self.activities addObject:activity]; [self.activityCompletions addObject:[completion copy]];
+}
+- (void)completeToken:(NSUInteger)index error:(NSError *)error {
+    DCSDKCompletion callback = self.tokenCompletions[index]; callback(error);
+}
+- (void)completeRefresh:(NSUInteger)index tokens:(NSDictionary *)tokens error:(NSError *)error {
+    DCSDKRefreshCompletion callback = self.refreshCompletions[index]; callback(tokens, error);
+}
+- (void)completeActivity:(NSUInteger)index error:(NSError *)error {
+    DCSDKCompletion callback = self.activityCompletions[index]; callback(error);
+}
+@end
+id<DCDiscordTransport> DCCreateDiscordTransport(void) { return [FakeSDK new]; }
 
-static void TestGateway(void) {
-    RecordingCommunicator *client = Client();
-    [client processTextCallback:@"not JSON"];
-    [client processTextCallback:@"[]"];
-    [client processTextCallback:@"{\"op\":null}"];
-    CHECK(client.sent.count == 0, "Malformed gateway frames are ignored");
-    [client processTextCallback:@"{\"op\":10,\"d\":{\"heartbeat_interval\":41250}}"];
-    CHECK([client.sent.lastObject[@"op"] isEqual:@2], "Hello identifies a new session");
-    CHECK([client.sent.lastObject[@"d"][@"large_threshold"] isKindOfClass:NSNumber.class], "Identify threshold is numeric");
-    CHECK(fabs([[client valueForKey:@"heartbeatInterval"] doubleValue] - 41.25) < 0.001, "Fractional heartbeat milliseconds are retained");
-    CHECK([client valueForKey:@"heartbeatTimer"] != nil, "Hello starts heartbeat timer");
-    [client processTextCallback:@"{\"op\":1}"];
-    CHECK(client.sent.lastObject[@"d"] == NSNull.null, "Heartbeat before any dispatch uses null sequence");
-    [client processTextCallback:@"{\"op\":11}"];
-    CHECK(![[client valueForKey:@"awaitingHeartbeatAck"] boolValue], "Heartbeat ACK clears pending state");
-    [client processTextCallback:@"{\"op\":0,\"t\":\"READY\",\"s\":9007199254740993,\"d\":{\"session_id\":\"session\",\"resume_gateway_url\":\"wss://gateway-us-east1-b.discord.gg\"}}"];
-    CHECK(client.state == DCConnectionStateConnected, "READY enters connected state");
-    CHECK([[client valueForKey:@"sequenceNumber"] longLongValue] == 9007199254740993LL, "Sequence numbers do not truncate to 32 bits or double");
-    CHECK([[client valueForKey:@"resumeGatewayURL"] containsString:@"v=10&encoding=json"], "Resume URL keeps gateway version and encoding");
+static NSDictionary *Credentials(NSString *session, BOOL expired) {
+    return @{@"accessToken": @"fake-access", @"refreshToken": @"fake-refresh",
+             @"expiresAt": @(NSDate.date.timeIntervalSince1970 + (expired ? -10 : 3600)),
+             @"scope": @"openid sdk.social_layer_presence", @"sessionID": session};
+}
+static NSDictionary *RotatedTokens(void) {
+    return @{@"accessToken": @"fake-rotated-access", @"refreshToken": @"fake-rotated-refresh",
+             @"expiresIn": @3600, @"scope": @"openid sdk.social_layer_presence", @"bearer": @YES};
+}
+static NSError *Failure(BOOL authentication) {
+    return [NSError errorWithDomain:@"FakeSDK" code:1 userInfo:@{DCSDKAuthenticationFailureKey: @(authentication)}];
+}
+static void ResetCredentials(BOOL expired) {
+    storedCredentials = Credentials(@"session-A", expired);
+    failStoreWrite = NO; credentialWrites = 0; credentialNotifications = 0;
+    UserPreferences.sharedInstance.settings = @{@"showAsDiscordStatus": @YES};
+}
+static void TestSocialSDK(void) {
+    CHECK(!DCSDKErrorRequiresRelink(400, NO, NO, nil), "Invalid activity payload does not erase OAuth credentials");
+    CHECK(!DCSDKErrorRequiresRelink(403, NO, NO, nil), "Activity permission failure does not erase OAuth credentials");
+    CHECK(!DCSDKErrorRequiresRelink(401, NO, NO, nil), "Presence token expiry permits a refresh before relinking");
+    CHECK(DCSDKErrorRequiresRelink(400, YES, NO, @"invalid_grant"), "OAuth invalid_grant requires a fresh account link");
+    CHECK(!DCSDKErrorRequiresRelink(400, YES, NO, @"invalid_client"), "Application configuration failure preserves the user's link");
+    ResetCredentials(NO);
+    FakeSDK *sdk = [FakeSDK new];
+    DCServerCommunicator *client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil];
+    CHECK(sdk.updatedTokens.count == 1 && sdk.connects == 0, "Connect waits for UpdateToken completion");
+    sdk.statusChanged(DCSocialSDKStatusReady, NO);
+    CHECK(client.state != DCConnectionStateConnected, "Early Ready cannot bypass token initialization");
+    [sdk completeToken:0 error:nil];
+    CHECK(sdk.connects == 1, "Successful bearer token initialization starts SDK connection");
+    sdk.statusChanged(DCSocialSDKStatusReady, NO);
+    CHECK(client.state == DCConnectionStateConnected, "SDK Ready enables presence publication");
+    [[client valueForKey:@"callbackTimer"] fire];
+    CHECK(sdk.callbacks == 1, "Main-runloop timer pumps SDK callbacks");
+    NSDictionary *activity = @{@"name": @"Artist", @"timestamps": @{@"start": @1700000000123LL, @"end": @1700000300999LL}};
+    [client sendActivityJson:[NSNotification notificationWithName:@"sendActivityJson" object:nil userInfo:activity]];
+    CHECK([sdk.activities.lastObject[@"timestamps"][@"start"] isEqual:@1700000000], "SDK presence receives seconds instead of helper milliseconds");
+    [sdk completeActivity:0 error:Failure(NO)];
+    CHECK([client valueForKey:@"presenceRetryTimer"] != nil, "Transient presence error schedules retry");
     [client sendActivityJson:[NSNotification notificationWithName:@"sendActivityJson" object:nil]];
-    CHECK([client.sent.lastObject[@"d"][@"activities"] isEqual:@[]], "Clearing activity sends an empty array");
-    TestSocket *oldSocket = (id)client.websocket;
-    [client processTextCallback:@"{\"op\":7}"];
-    CHECK(client.state == DCConnectionStateReconnecting, "Opcode 7 initiates reconnect");
-    CHECK(oldSocket.closeCode == 4000, "Reconnect does not invalidate resumable session with code 1000");
-    CHECK([client valueForKey:@"sessionId"] != nil, "Reconnect retains session");
-    NSTimer *retry = [client valueForKey:@"reconnectTimer"];
-    [client reconnect];
-    CHECK([client valueForKey:@"reconnectTimer"] == retry, "Concurrent transport failures schedule only one retry");
-    [retry invalidate];
-    [client setValue:nil forKey:@"reconnectTimer"];
-    client.websocket = (NSURLSessionWebSocketTask *)(id)[TestSocket new];
-    client.state = DCConnectionStateConnecting;
-    [client processTextCallback:@"{\"op\":10,\"d\":{\"heartbeat_interval\":41250}}"];
-    CHECK([client.sent.lastObject[@"op"] isEqual:@6], "Hello resumes a retained session");
-    CHECK([client valueForKey:@"heartbeatTimer"] != nil, "Resumed connection has its own heartbeat timer");
-    CHECK([client.sent.lastObject[@"d"][@"seq"] longLongValue] == 9007199254740993LL, "Resume carries exact sequence");
-    [client processTextCallback:@"{\"op\":0,\"t\":\"RESUMED\",\"s\":9007199254740994,\"d\":{}}"];
-    CHECK(client.state == DCConnectionStateConnected, "RESUMED enters connected state");
-    [client setValue:@YES forKey:@"awaitingHeartbeatAck"];
-    [client sendHeartbeat:nil];
-    CHECK(client.state == DCConnectionStateReconnecting, "Missing heartbeat ACK reconnects");
+    CHECK(sdk.clears > 0 && [client valueForKey:@"presenceRetryTimer"] == nil, "Paused playback clears presence and cancels stale retries");
+    [client sendActivityJson:[NSNotification notificationWithName:@"sendActivityJson" object:nil userInfo:activity]];
+    [sdk completeActivity:1 error:[NSError errorWithDomain:@"FakeSDK" code:401 userInfo:@{DCSDKRefreshRequiredKey: @YES}]];
+    CHECK(sdk.refreshTokens.count == 1 && storedCredentials, "Presence 401 refreshes the linked OAuth account");
+    [sdk completeRefresh:0 tokens:RotatedTokens() error:nil];
+    [sdk completeToken:1 error:nil];
+    CHECK(sdk.activities.count == 3 && sdk.connects == 1, "Refresh republishes pending presence when the SDK remains connected");
+    void (^oldStatus)(DCSocialSDKStatus, BOOL) = sdk.statusChanged;
+    NSUInteger disconnects = sdk.disconnects;
     [client sleep:nil];
-    CHECK(client.websocket == nil && [client valueForKey:@"reconnectTimer"] == nil && [client valueForKey:@"heartbeatTimer"] == nil, "Sleep cancels connection and timers");
-    CHECK([client valueForKey:@"sessionId"] == nil, "Intentional normal close forgets invalidated session");
+    CHECK(!client.Active && sdk.disconnects > disconnects, "Idle disconnects the SDK");
+    oldStatus(DCSocialSDKStatusReady, NO);
+    CHECK(client.state == DCConnectionStateDisconnected, "Queued old-session status callback cannot wake an idle connection");
+    [sdk completeActivity:0 error:Failure(NO)];
+    CHECK([client valueForKey:@"presenceRetryTimer"] == nil, "Late presence failure after sleep cannot schedule work");
 
-    client = Client();
-    [client setValue:@"session" forKey:@"sessionId"];
-    [client setValue:@5 forKey:@"sequenceNumber"];
-    [client processTextCallback:@"{\"op\":9,\"d\":true}"];
-    CHECK([client valueForKey:@"sessionId"] != nil, "Resumable invalid-session preserves session");
-    [client sleep:nil];
-    client = Client();
-    [client setValue:@"session" forKey:@"sessionId"];
-    [client processTextCallback:@"{\"op\":9,\"d\":false}"];
-    CHECK([client valueForKey:@"sessionId"] == nil, "Non-resumable invalid-session clears session");
-    [client sleep:nil];
-    client = Client();
-    [client processTextCallback:@"{\"op\":10,\"d\":null}"];
-    CHECK(client.state == DCConnectionStateReconnecting, "Malformed Hello safely reconnects");
-    [client sleep:nil];
-    client = Client();
-    [client processTextCallback:@"{\"op\":0,\"t\":\"READY\",\"s\":1,\"d\":{\"session_id\":\"session\",\"resume_gateway_url\":\"wss://attacker.example\"}}"];
-    CHECK([client valueForKey:@"resumeGatewayURL"] == nil, "Resume rejects non-Discord destinations");
-    [client processCloseCallback:4004 message:@"Do not log server payload"];
-    CHECK(!client.Active && [[client valueForKey:@"authenticationBlocked"] boolValue], "Authentication failure stops retries");
+    ResetCredentials(NO);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; [client sleep:nil]; [sdk completeToken:0 error:nil];
+    CHECK(sdk.connects == 0, "UpdateToken completing after disable cannot connect");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client startCommunicator]; [client serviceCredentials];
+    CHECK(sdk.refreshTokens.count == 1 && sdk.updatedTokens.count == 0, "Expired credentials refresh at startup while disconnected, with one refresh in flight");
+    [sdk completeRefresh:0 tokens:RotatedTokens() error:nil];
+    CHECK(credentialWrites == 1 && [storedCredentials[@"refreshToken"] isEqual:@"fake-rotated-refresh"], "Rotated access and refresh credentials persist together");
+    CHECK(sdk.updatedTokens.count == 0 && sdk.connects == 0, "Background refresh does not publish while inactive");
     [client awake:nil];
-    CHECK(client.starts == 0, "Playback cannot restart rejected authentication");
-    [client settingsChanged:nil];
+    CHECK(sdk.appliedOnlyPersistedTokens && [sdk.updatedTokens.lastObject isEqual:@"fake-rotated-access"], "Only durably stored rotated credentials reach UpdateToken");
+    [sdk completeToken:0 error:nil]; sdk.statusChanged(DCSocialSDKStatusReady, NO);
+    sdk.tokenExpiring();
+    CHECK(sdk.refreshTokens.count == 2, "SDK token-expiration callback requests a refresh before stored expiration");
+    [client sleep:nil];
+    [sdk completeRefresh:1 tokens:RotatedTokens() error:nil];
+    CHECK(credentialWrites == 2 && sdk.updatedTokens.count == 1, "Refresh finishing after disable persists tokens without reconnecting");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; [IPOAuthStore clearCredentials]; [client serviceCredentials];
+    [sdk completeRefresh:0 tokens:RotatedTokens() error:nil];
+    CHECK(!storedCredentials && sdk.updatedTokens.count == 0, "Logout wins over an in-flight token refresh");
+    CHECK(credentialWrites == 0, "Late refresh credentials are discarded while logged out");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; oldStatus = sdk.statusChanged;
+    storedCredentials = Credentials(@"session-B", NO); [client serviceCredentials];
+    [sdk completeRefresh:0 tokens:RotatedTokens() error:nil];
+    CHECK([storedCredentials[@"sessionID"] isEqual:@"session-B"] && credentialWrites == 0, "Late refresh cannot overwrite a newer login");
+    CHECK(sdk.updatedTokens.count == 1 && [sdk.updatedTokens.lastObject isEqual:@"fake-access"], "Only the newer login's token is applied after a stale refresh");
+    oldStatus(DCSocialSDKStatusDisconnected, YES);
+    CHECK([storedCredentials[@"sessionID"] isEqual:@"session-B"], "Old SDK authorization failure cannot delete a newer login");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; failStoreWrite = YES;
+    [sdk completeRefresh:0 tokens:RotatedTokens() error:nil];
+    CHECK(!storedCredentials && sdk.updatedTokens.count == 0 && credentialNotifications == 1, "Failed rotated-token persistence discards unusable credentials and requires sign-in");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; [sdk completeRefresh:0 tokens:nil error:Failure(YES)];
+    [client serviceCredentials];
+    CHECK(!storedCredentials && credentialNotifications == 1 && sdk.refreshTokens.count == 1, "Rejected refresh clears only its session and stops retries");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; [sdk completeRefresh:0 tokens:nil error:Failure(NO)]; [client serviceCredentials];
+    CHECK(storedCredentials && sdk.refreshTokens.count == 1, "Transient refresh errors preserve account and respect backoff");
+    [client setValue:@0 forKey:@"retryAt"]; [client serviceCredentials];
+    CHECK(sdk.refreshTokens.count == 2, "Disconnected maintenance retries refresh after backoff");
+
+    ResetCredentials(YES);
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
+    [client awake:nil]; NSMutableDictionary *invalid = [RotatedTokens() mutableCopy]; invalid[@"bearer"] = @NO;
+    [sdk completeRefresh:0 tokens:invalid error:nil];
+    CHECK(!storedCredentials && sdk.updatedTokens.count == 0, "Personal session tokens cannot enter the Social SDK transport");
+
+    storedCredentials = nil;
+    UserPreferences.sharedInstance.settings = @{@"showAsDiscordStatus": @YES, @"token": @"unused-legacy-value"};
+    sdk = [FakeSDK new]; client = [[DCServerCommunicator alloc] initWithTransport:sdk];
     [client awake:nil];
-    CHECK(client.starts == 1, "Settings change permits corrected authentication");
-    [client sleep:nil];
-    client = Client();
-    [client setValue:@"old" forKey:@"sessionId"];
-    [client processCloseCallback:4007 message:nil];
-    CHECK([client valueForKey:@"sessionId"] == nil, "Invalid sequence close clears session");
-    [client sleep:nil];
+    CHECK(!client.Active && sdk.updatedTokens.count == 0 && sdk.refreshTokens.count == 0, "Legacy plaintext token preferences never enable a connection");
+    CHECK([DCActivityForSocialSDK(activity)[@"timestamps"][@"end"] isEqual:@1700000300], "Timestamp conversion floors milliseconds to SDK seconds");
+    CHECK([activity[@"timestamps"][@"start"] isEqual:@1700000000123LL], "SDK conversion does not mutate helper metadata");
+    CHECK(DCActivityForSocialSDK(@{@"timestamps": @{@"start": @2000, @"end": @1000}})[@"timestamps"] == nil, "SDK conversion drops reversed timestamps");
+    CHECK(DCActivityForSocialSDK(@{@"timestamps": @{@"start": @(NAN), @"end": @(INFINITY)}})[@"timestamps"] == nil, "SDK conversion rejects nonfinite timestamps");
+    ResetCredentials(NO);
 }
 
 static void TestPresence(void) {
@@ -166,68 +261,51 @@ static void TestPresence(void) {
 }
 
 static void TestStateAndPreferences(void) {
+    ResetCredentials(NO);
     NSString *temporary = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
     [NSFileManager.defaultManager createDirectoryAtPath:temporary withIntermediateDirectories:YES attributes:nil error:NULL];
     NSString *statePath = [temporary stringByAppendingPathComponent:@"state.plist"];
-    Core *core = [Core new];
-    core.pathToState = statePath;
+    Core *core = [Core new]; core.pathToState = statePath;
     [core editCurrentState];
     CHECK(![core.currentState[@"musicIsPlaying"] boolValue], "Missing helper state is stopped");
     [@{@"currentState": @{@"musicIsPlaying": @YES, @"metadata": @{}, @"updatedAt": @(NSDate.date.timeIntervalSince1970 - 121)}} writeToFile:statePath atomically:YES];
     [core editCurrentState];
     CHECK(![core.currentState[@"musicIsPlaying"] boolValue], "Stale helper state is stopped");
     [@{@"currentState": @{@"musicIsPlaying": @YES, @"metadata": @{}, @"updatedAt": @(NSDate.date.timeIntervalSince1970)}} writeToFile:statePath atomically:YES];
-    [core editCurrentState];
-    CHECK([core.currentState[@"musicIsPlaying"] boolValue], "Fresh helper state accepted");
-    [core core];
-    CHECK(core.isAwake, "Playback wakes daemon");
-    core.currentState = @{@"musicIsPlaying": @NO};
-    [core core];
-    NSTimer *idle = core.asleepTimer;
-    [core core];
+    [core editCurrentState]; [core core];
+    CHECK([core.currentState[@"musicIsPlaying"] boolValue] && core.isAwake, "Fresh playback and OAuth credentials wake daemon");
+    core.currentState = @{@"musicIsPlaying": @NO}; [core core];
+    NSTimer *idle = core.asleepTimer; [core core];
     CHECK(core.asleepTimer == idle, "Paused refreshes preserve fixed idle deadline");
-    [core setAsleep];
-    core.currentState = @{@"musicIsPlaying": @YES};
-    [core core];
+    [core setAsleep]; core.currentState = @{@"musicIsPlaying": @YES}; [core core];
     CHECK(core.isAwake, "Playback restarts after idle sleep");
-    [core setAsleep];
-    RecordingCommunicator *client = Client();
-    [client processCloseCallback:4004 message:nil];
-    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-    [center addObserver:client selector:@selector(awake:) name:@"awake" object:nil];
-    [center addObserver:client selector:@selector(sleep:) name:@"sleep" object:nil];
-    [center addObserver:client selector:@selector(settingsChanged:) name:@"resetConnection" object:nil];
-    core.isAwake = YES;
+    [IPOAuthStore clearCredentials]; [core core];
+    CHECK(!core.isAwake, "Account unlink stops publication even during playback");
+    ResetCredentials(NO);
+    UserPreferences.sharedInstance.settings = @{@"showAsDiscordStatus": @NO};
     [core settingsChanged:nil];
-    CHECK(core.isAwake && client.Active && client.starts == 1, "Settings reset rejected authentication before waking active playback");
-    UserPreferences.sharedInstance.settings = @{@"token": @"changed", @"showAsDiscordStatus": @NO};
-    [core settingsChanged:nil];
-    CHECK(!core.isAwake && !client.Active, "Disabling publishing disconnects without restarting playback");
-    [center removeObserver:client];
-    UserPreferences.sharedInstance.settings = @{@"token": @"test-only-credential", @"showAsDiscordStatus": @YES};
+    CHECK(!core.isAwake, "Disabling publication prevents a settings reset from waking playback");
     [@{@"currentState": @{@"musicIsPlaying": @[@YES], @"metadata": @"bad", @"updatedAt": @(NSDate.date.timeIntervalSince1970)}} writeToFile:statePath atomically:YES];
     [core editCurrentState];
     CHECK(![core.currentState[@"musicIsPlaying"] boolValue] && [core.currentState[@"metadata"] isEqual:@{}], "Malformed helper values cannot crash daemon");
     UserPreferences *preferences = [UserPreferences new];
-    preferences.pathToSettings = [temporary stringByAppendingPathComponent:@"prefs.plist"];
-    [preferences settingsUpdated];
-    CHECK(![preferences valOfShowAsDiscordStatus] && ![preferences valOfToken].length, "Missing settings disable activity");
-    preferences.settings = @{@"token": @12, @"showAsDiscordStatus": @"yes", @"displayIosVersion": @[], @"iosVersion": @42};
-    CHECK(![preferences valOfToken] && ![preferences valOfShowAsDiscordStatus] && ![preferences valOfDisplayIosVersion] && [[preferences valOfIosVersion] isEqual:@""], "Malformed preference values rejected");
-    preferences.settings = @{@"token": @"  test-token\n"};
-    CHECK([[preferences valOfToken] isEqual:@"test-token"], "Credential whitespace trimmed");
+    preferences.pathToSettings = [temporary stringByAppendingPathComponent:@"prefs.plist"]; [preferences settingsUpdated];
+    CHECK(![preferences valOfShowAsDiscordStatus], "Missing settings disable activity");
+    preferences.settings = @{@"showAsDiscordStatus": @"yes", @"displayIosVersion": @[], @"iosVersion": @42};
+    CHECK(![preferences valOfShowAsDiscordStatus] && ![preferences valOfDisplayIosVersion] && [[preferences valOfIosVersion] isEqual:@""], "Malformed preference values rejected");
+    CHECK([preferences valOfLinkedAccount], "OAuth linkage comes from credential store");
+    [IPOAuthStore clearCredentials]; preferences.settings = @{@"token": @"legacy"};
+    CHECK(![preferences valOfLinkedAccount], "Legacy preferences cannot impersonate OAuth account linkage");
     CHECK([Tools parseJSON:@"[]"] == nil && [[Tools parseJSON:@"{\"value\":1}"][@"value"] isEqual:@1], "JSON parsing works on main thread without deadlock");
     [NSFileManager.defaultManager removeItemAtPath:temporary error:NULL];
 }
 
 int main(void) {
     @autoreleasepool {
-        // A fake credential is only consumed by the recording subclass, never sent to the network.
-        UserPreferences.sharedInstance.settings = @{@"token": @"test-only-credential", @"showAsDiscordStatus": @YES};
-        TestGateway();
+        TestSocialSDK();
         TestPresence();
         TestStateAndPreferences();
-        printf("Passed %lu daemon regression checks (offline).\n", (unsigned long)checks);
+        printf("Passed %lu daemon regression checks (offline; fake SDK and credential store).\n", (unsigned long)checks);
     }
     return 0;
 }

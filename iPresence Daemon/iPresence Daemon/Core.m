@@ -62,12 +62,12 @@ static void PlaybackChanged(CFNotificationCenterRef center, void *observer, CFSt
 }
 
 - (void)core {
-    if (![UserPreferences.sharedInstance valOfShowAsDiscordStatus] || ![UserPreferences.sharedInstance valOfToken].length) {
+    if (![UserPreferences.sharedInstance valOfShowAsDiscordStatus] || ![UserPreferences.sharedInstance valOfLinkedAccount]) {
         [self setAsleep];
         return;
     }
     self.musicIsPlaying = [self.currentState[@"musicIsPlaying"] boolValue];
-    // Cache the latest state before a connection can emit READY/RESUMED.
+    // Cache the latest state before the Social SDK can become ready.
     [NSNotificationCenter.defaultCenter postNotificationName:@"playbackStateChanged" object:self userInfo:self.currentState];
     if (self.musicIsPlaying) [self setAwake];
     else if (self.isAwake) [self setAsleepTimer];

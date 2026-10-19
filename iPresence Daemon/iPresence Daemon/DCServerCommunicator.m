@@ -1,28 +1,39 @@
 #import "DCServerCommunicator.h"
+#import "IPOAuthStore.h"
 #import "UserPreferences.h"
 #import "Logger.h"
 #import <math.h>
 
-static NSString *const DCDefaultGateway = @"wss://gateway.discord.gg/?v=10&encoding=json";
+static BOOL NonemptyString(id value) { return [value isKindOfClass:NSString.class] && [value length] > 0; }
+static BOOL ValidCredentials(NSDictionary *value) {
+    return [value isKindOfClass:NSDictionary.class] && NonemptyString(value[@"accessToken"]) &&
+        NonemptyString(value[@"refreshToken"]) && NonemptyString(value[@"sessionID"]) &&
+        [value[@"expiresAt"] isKindOfClass:NSNumber.class] && isfinite([value[@"expiresAt"] doubleValue]);
+}
+static NSTimeInterval RetryDelay(NSError *error) {
+    double delay = [error.userInfo[DCSDKRetryAfterKey] doubleValue];
+    return isfinite(delay) ? MAX(30, MIN(delay, 3600)) : 30;
+}
 
 @interface DCServerCommunicator ()
-@property (nonatomic, strong) NSURLSession *session;
-@property (nonatomic, copy) NSString *sessionId;
-@property (nonatomic, copy) NSString *resumeGatewayURL;
-@property (nonatomic, strong) NSNumber *sequenceNumber;
-@property (nonatomic, strong) NSTimer *heartbeatTimer;
-@property (nonatomic, strong) NSTimer *reconnectTimer;
-@property (nonatomic, strong) NSTimer *identifyTimer;
-@property (nonatomic, strong) NSTimer *handshakeTimer;
-@property (nonatomic) NSTimeInterval heartbeatInterval;
-@property (nonatomic) NSTimeInterval nextIdentifyTime;
-@property (nonatomic) BOOL awaitingHeartbeatAck;
-@property (nonatomic) BOOL authenticationBlocked;
-@property (nonatomic) NSUInteger reconnectAttempts;
+@property (nonatomic, strong) id<DCDiscordTransport> transport;
+@property (nonatomic, strong) NSTimer *callbackTimer;
+@property (nonatomic, strong) NSTimer *maintenanceTimer;
+@property (nonatomic, strong) NSTimer *presenceRetryTimer;
+@property (nonatomic, copy) NSString *observedSession;
+@property (nonatomic, copy) NSString *blockedSession;
+@property (nonatomic, copy) NSString *refreshOperation;
+@property (nonatomic, copy) NSString *appliedAccessToken;
+@property (nonatomic, copy) NSDictionary *pendingActivity;
+@property (nonatomic) NSUInteger generation;
+@property (nonatomic) NSUInteger authorizedGeneration;
+@property (nonatomic) NSUInteger presenceRevision;
+@property (nonatomic) BOOL updatingToken;
+@property (nonatomic) BOOL forceRefresh;
+@property (nonatomic) NSTimeInterval retryAt;
 @end
 
 @implementation DCServerCommunicator
-
 + (instancetype)sharedInstance {
     static DCServerCommunicator *shared;
     static dispatch_once_t once;
@@ -36,293 +47,259 @@ static NSString *const DCDefaultGateway = @"wss://gateway.discord.gg/?v=10&encod
     });
     return shared;
 }
-
-- (instancetype)init {
+- (instancetype)init { return [self initWithTransport:DCCreateDiscordTransport()]; }
+- (instancetype)initWithTransport:(id<DCDiscordTransport>)transport {
     if ((self = [super init])) {
-        _gatewayURL = DCDefaultGateway;
+        _transport = transport;
         _state = DCConnectionStateDisconnected;
+        _generation = 1;
+        [self installCallbacks];
     }
     return self;
 }
-
-- (void)clearSession {
-    self.sessionId = nil;
-    self.sequenceNumber = nil;
-    self.resumeGatewayURL = nil;
+- (void)installCallbacks {
+    NSUInteger generation = self.generation;
+    __weak typeof(self) weakSelf = self;
+    self.transport.statusChanged = ^(DCSocialSDKStatus status, BOOL authenticationFailure) {
+        DCServerCommunicator *self = weakSelf;
+        if (self && self.generation == generation) [self sdkStatusChanged:status authenticationFailure:authenticationFailure];
+    };
+    self.transport.tokenExpiring = ^{
+        DCServerCommunicator *self = weakSelf;
+        if (!self || self.generation != generation) return;
+        self.forceRefresh = YES;
+        [self serviceCredentials];
+    };
 }
-
 - (void)startCommunicator {
-    if (!self.Active || self.authenticationBlocked || self.websocket) return;
-    if (![UserPreferences.sharedInstance valOfToken].length) return;
-    if (!self.session) {
-        NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.ephemeralSessionConfiguration;
-        configuration.timeoutIntervalForRequest = 30;
-        configuration.URLCache = nil;
-        // Foundation performs normal system TLS trust evaluation. No custom trust overrides.
-        self.session = [NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:NSOperationQueue.mainQueue];
-    }
-    NSString *address = (self.sessionId.length && self.sequenceNumber && self.resumeGatewayURL.length)
-        ? self.resumeGatewayURL : self.gatewayURL;
-    NSURL *url = [NSURL URLWithString:address];
-    if (![url.scheme.lowercaseString isEqualToString:@"wss"]) return;
-    self.state = DCConnectionStateConnecting;
-    self.websocket = [self.session webSocketTaskWithURL:url];
-    self.websocket.maximumMessageSize = 16 * 1024 * 1024;
-    [self.websocket resume];
-    [self receiveFromTask:self.websocket];
+    NSAssert(NSThread.isMainThread, @"The Discord SDK must run on the main queue");
     __weak typeof(self) weakSelf = self;
-    self.handshakeTimer = [NSTimer scheduledTimerWithTimeInterval:45 repeats:NO block:^(NSTimer *timer) {
-        [weakSelf reconnect];
-    }];
-}
-
-- (void)receiveFromTask:(NSURLSessionWebSocketTask *)task {
-    __weak typeof(self) weakSelf = self;
-    [task receiveMessageWithCompletionHandler:^(NSURLSessionWebSocketMessage *message, NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            typeof(self) self = weakSelf;
-            if (!self || self.websocket != task) return;
-            if (error) {
-                [self handleTransportFailure:task];
-                return;
-            }
-            NSString *text = message.type == NSURLSessionWebSocketMessageTypeString ? message.string :
-                [[NSString alloc] initWithData:message.data encoding:NSUTF8StringEncoding];
-            if (text) [self processTextCallback:text];
-            if (self.websocket == task) [self receiveFromTask:task];
-        });
-    }];
-}
-
-- (void)handleTransportFailure:(NSURLSessionWebSocketTask *)task {
-    // Allow didCloseWithCode to deliver Discord's application close code first.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (self.websocket == task) [self processCloseCallback:task.closeCode message:nil];
-    });
-}
-
-- (void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task
- didCloseWithCode:(NSURLSessionWebSocketCloseCode)closeCode reason:(NSData *)reason {
-    if (self.websocket == task) [self processCloseCallback:closeCode message:nil];
-}
-
-- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
-    if (self.websocket == task) [self handleTransportFailure:(NSURLSessionWebSocketTask *)task];
-}
-
-- (void)processCloseCallback:(NSUInteger)code message:(NSString *)message {
-    if (!self.Active || self.state == DCConnectionStateReconnecting) return;
-    [Logger Log:[NSString stringWithFormat:@"Gateway closed (%lu)", (unsigned long)code]];
-    // Authentication/protocol errors require a settings change, not an endless retry loop.
-    if (code == 4004 || code == 4010 || code == 4011 || code == 4012 || code == 4013 || code == 4014) {
-        self.authenticationBlocked = YES;
-        [self clearSession];
-        [self sleep:nil];
-        [Logger Log:@"Gateway authentication or configuration rejected; update settings before retrying."];
-        return;
-    }
-    if (code == 4007 || code == 4009 || code == 1000 || code == 1001) [self clearSession];
-    [self reconnect];
-}
-
-- (void)processTextCallback:(NSString *)response {
-    NSData *data = [response dataUsingEncoding:NSUTF8StringEncoding];
-    if (!data) return;
-    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
-    if (![object isKindOfClass:NSDictionary.class] || ![object[@"op"] isKindOfClass:NSNumber.class]) return;
-    NSDictionary *payload = object;
-    id value = payload[@"d"];
-    NSDictionary *details = [value isKindOfClass:NSDictionary.class] ? value : @{};
-    switch ([payload[@"op"] integerValue]) {
-        case 10: {
-            if (self.state != DCConnectionStateConnecting) return;
-            id interval = details[@"heartbeat_interval"];
-            if (![interval isKindOfClass:NSNumber.class] || !isfinite([interval doubleValue]) || [interval doubleValue] < 1000) {
-                [self reconnect];
-                return;
-            }
-            self.heartbeatInterval = [interval doubleValue] / 1000.0;
-            self.awaitingHeartbeatAck = NO;
-            [self scheduleHeartbeat:self.heartbeatInterval * ((double)arc4random_uniform(1000000) / 1000000.0)];
-            self.state = DCConnectionStateIdentifying;
-            if (self.sessionId.length && self.sequenceNumber) [self sendResume];
-            else [self sendIdentify:details];
-            break;
-        }
-        case 0: {
-            if ([payload[@"s"] isKindOfClass:NSNumber.class]) self.sequenceNumber = payload[@"s"];
-            NSString *event = [payload[@"t"] isKindOfClass:NSString.class] ? payload[@"t"] : nil;
-            if ([event isEqualToString:@"READY"]) {
-                if (![details[@"session_id"] isKindOfClass:NSString.class] || ![details[@"session_id"] length]) {
-                    [self forceReconnect];
-                    return;
-                }
-                self.sessionId = details[@"session_id"];
-                NSString *resume = [details[@"resume_gateway_url"] isKindOfClass:NSString.class] ? details[@"resume_gateway_url"] : nil;
-                NSURLComponents *components = resume ? [NSURLComponents componentsWithString:resume] : nil;
-                NSString *host = components.host.lowercaseString;
-                // Do not send credentials to an arbitrary URL supplied in a malformed event.
-                if ([components.scheme.lowercaseString isEqualToString:@"wss"] &&
-                    ([host isEqualToString:@"discord.gg"] || [host hasSuffix:@".discord.gg"])) {
-                    components.query = @"v=10&encoding=json";
-                    components.user = nil;
-                    components.password = nil;
-                    self.resumeGatewayURL = components.URL.absoluteString;
-                } else self.resumeGatewayURL = nil;
-            }
-            if ([event isEqualToString:@"READY"] || [event isEqualToString:@"RESUMED"]) {
-                self.state = DCConnectionStateConnected;
-                self.reconnectAttempts = 0;
-                [self.handshakeTimer invalidate];
-                self.handshakeTimer = nil;
-                [NSNotificationCenter.defaultCenter postNotificationName:@"connected" object:self];
-            }
-            break;
-        }
-        case 1: // Server-requested heartbeats do not reset the regular schedule.
-            [self transmitHeartbeat];
-            break;
-        case 7:
-            [self reconnect];
-            break;
-        case 9:
-            if (![value isKindOfClass:NSNumber.class] || ![value boolValue]) [self clearSession];
-            [self reconnectWithMinimumDelay:1.0 + arc4random_uniform(4000) / 1000.0];
-            break;
-        case 11:
-            self.awaitingHeartbeatAck = NO;
-            break;
-        default:
-            break;
-    }
-}
-
-- (void)sendResume {
-    NSString *token = [UserPreferences.sharedInstance valOfToken];
-    if (!token.length || !self.sessionId.length || !self.sequenceNumber) return;
-    [self sendJSON:@{@"op": @6, @"d": @{@"token": token, @"session_id": self.sessionId, @"seq": self.sequenceNumber}}];
-}
-
-- (void)sendIdentify:(NSDictionary *)hello {
-    NSTimeInterval delay = self.nextIdentifyTime - NSProcessInfo.processInfo.systemUptime;
-    if (delay > 0) {
-        [self.identifyTimer invalidate];
-        __weak typeof(self) weakSelf = self;
-        self.identifyTimer = [NSTimer scheduledTimerWithTimeInterval:delay repeats:NO block:^(NSTimer *timer) {
-            [weakSelf sendIdentify:nil];
+    if (!self.callbackTimer) {
+        self.callbackTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+            [weakSelf.transport runCallbacks];
         }];
-        return;
+        self.callbackTimer.tolerance = 0.01;
     }
-    NSString *token = [UserPreferences.sharedInstance valOfToken];
-    if (!token.length || !self.Active) return;
-    self.nextIdentifyTime = NSProcessInfo.processInfo.systemUptime + 5.5;
-    [self sendJSON:@{@"op": @2, @"d": @{
-        @"token": token, @"intents": @0,
-        @"properties": @{@"os": @"iOS", @"browser": @"iPresence", @"device": @"iPresence"},
-        @"large_threshold": @50, @"compress": @NO
-    }}];
-}
-
-- (void)scheduleHeartbeat:(NSTimeInterval)delay {
-    [self.heartbeatTimer invalidate];
-    __weak typeof(self) weakSelf = self;
-    self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:MAX(0.001, delay) repeats:NO block:^(NSTimer *timer) {
-        [weakSelf sendHeartbeat:timer];
-    }];
-}
-
-- (void)transmitHeartbeat {
-    self.awaitingHeartbeatAck = YES;
-    [self sendJSON:@{@"op": @1, @"d": self.sequenceNumber ?: NSNull.null}];
-}
-
-- (void)sendHeartbeat:(NSTimer *)timer {
-    if (!self.Active || !self.websocket) return;
-    if (self.awaitingHeartbeatAck) {
-        [self reconnect];
-        return;
+    if (!self.maintenanceTimer) {
+        // The SDK's expiration callback does not run while disconnected. Keep an independent check.
+        self.maintenanceTimer = [NSTimer scheduledTimerWithTimeInterval:15 repeats:YES block:^(NSTimer *timer) {
+            [weakSelf serviceCredentials];
+        }];
+        self.maintenanceTimer.tolerance = 1;
     }
-    [self transmitHeartbeat];
-    [self scheduleHeartbeat:self.heartbeatInterval];
+    [self serviceCredentials];
 }
-
-- (void)cancelConnectionWithCode:(NSURLSessionWebSocketCloseCode)code {
-    [self.heartbeatTimer invalidate]; self.heartbeatTimer = nil;
-    [self.identifyTimer invalidate]; self.identifyTimer = nil;
-    [self.handshakeTimer invalidate]; self.handshakeTimer = nil;
-    self.awaitingHeartbeatAck = NO;
-    NSURLSessionWebSocketTask *task = self.websocket;
-    self.websocket = nil; // Ignore asynchronous callbacks from the old task.
-    [task cancelWithCloseCode:code reason:nil];
-}
-
-- (void)reconnectWithMinimumDelay:(NSTimeInterval)minimum {
-    if (!self.Active || self.reconnectTimer) return;
-    self.state = DCConnectionStateReconnecting;
-    [NSNotificationCenter.defaultCenter postNotificationName:@"idle" object:self];
-    // 1000/1001 invalidate the Discord session; 4000 permits resume.
-    [self cancelConnectionWithCode:(NSURLSessionWebSocketCloseCode)4000];
-    NSTimeInterval delay = MIN(60.0, 2.0 * pow(2.0, MIN(self.reconnectAttempts, 5UL)));
-    self.reconnectAttempts++;
-    delay = MAX(minimum, delay + arc4random_uniform(1000) / 1000.0);
-    __weak typeof(self) weakSelf = self;
-    self.reconnectTimer = [NSTimer scheduledTimerWithTimeInterval:delay repeats:NO block:^(NSTimer *timer) {
-        weakSelf.reconnectTimer = nil;
-        [weakSelf startCommunicator];
-    }];
-}
-
-- (void)reconnect { [self reconnectWithMinimumDelay:0]; }
-- (void)forceReconnect { [self clearSession]; [self reconnect]; }
-
-- (void)disconnect {
-    [self.reconnectTimer invalidate]; self.reconnectTimer = nil;
-    [self cancelConnectionWithCode:NSURLSessionWebSocketCloseCodeNormalClosure];
-    [self clearSession];
-}
-
-- (void)sendActivityJson:(NSNotification *)notification {
-    if (self.state != DCConnectionStateConnected) return;
-    NSArray *activities = notification.userInfo.count ? @[notification.userInfo] : @[];
-    [self sendJSON:@{@"op": @3, @"d": @{
-        @"since": NSNull.null, @"activities": activities, @"status": @"idle", @"afk": @NO
-    }}];
-}
-
-- (void)sendJSON:(NSDictionary *)dictionary {
-    NSURLSessionWebSocketTask *task = self.websocket;
-    if (!task || !self.Active || self.state == DCConnectionStateReconnecting) return;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:dictionary options:0 error:NULL];
-    if (!data || data.length > 4096) return;
-    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    // Never log payloads: Identify and Resume contain the account credential.
-    __weak typeof(self) weakSelf = self;
-    [task sendMessage:[[NSURLSessionWebSocketMessage alloc] initWithString:json] completionHandler:^(NSError *error) {
-        if (!error) return;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (weakSelf.websocket == task) [weakSelf handleTransportFailure:task];
-        });
-    }];
-}
-
-- (void)awake:(NSNotification *)notification {
-    if (self.Active || self.authenticationBlocked || ![UserPreferences.sharedInstance valOfShowAsDiscordStatus] ||
-        ![UserPreferences.sharedInstance valOfToken].length) return;
-    self.Active = YES;
-    [NSNotificationCenter.defaultCenter postNotificationName:@"idle" object:self];
-    [self startCommunicator];
-}
-
-- (void)sleep:(NSNotification *)notification {
-    self.Active = NO;
+- (void)resetTransport {
+    if (self.state != DCConnectionStateDisconnected) [Logger Log:@"Discord SDK disconnected."];
+    self.generation++;
+    [self installCallbacks];
+    self.authorizedGeneration = 0;
+    self.updatingToken = NO;
+    self.appliedAccessToken = nil;
+    self.pendingActivity = nil;
+    self.presenceRevision++;
+    [self.presenceRetryTimer invalidate];
+    self.presenceRetryTimer = nil;
+    [self.transport clearPresence];
+    [self.transport disconnect];
     self.state = DCConnectionStateDisconnected;
-    [self disconnect];
     [NSNotificationCenter.defaultCenter postNotificationName:@"disconnected" object:self];
 }
-
+- (void)rejectSession:(NSString *)session {
+    if (![self.observedSession isEqual:session]) return;
+    self.blockedSession = session;
+    [self resetTransport];
+    if ([IPOAuthStore clearCredentialsIfSessionMatches:session]) [IPOAuthStore notifyChanged];
+    [Logger Log:@"Discord authorization expired or was rejected. Link the account again in iPresence."];
+}
+- (BOOL)isCurrentSession:(NSString *)session {
+    return session.length && [[IPOAuthStore credentials][@"sessionID"] isEqual:session];
+}
+- (void)serviceCredentials {
+    NSAssert(NSThread.isMainThread, @"OAuth refresh must run on the main queue");
+    NSDictionary *credentials = [IPOAuthStore credentials];
+    if (!ValidCredentials(credentials)) credentials = nil;
+    NSString *session = credentials[@"sessionID"];
+    if (!((!session && !self.observedSession) || [session isEqual:self.observedSession])) {
+        [self resetTransport];
+        self.observedSession = session;
+        self.blockedSession = nil;
+        self.refreshOperation = nil;
+        self.forceRefresh = NO;
+        self.retryAt = 0;
+    }
+    if (!credentials || [self.blockedSession isEqual:session] || self.refreshOperation) return;
+    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
+    if (now < self.retryAt) return;
+    if (self.forceRefresh || [credentials[@"expiresAt"] doubleValue] <= now + 90) {
+        [self refreshCredentials:credentials];
+        return;
+    }
+    if (!self.Active || ![UserPreferences.sharedInstance valOfShowAsDiscordStatus] || self.updatingToken) return;
+    if (![self.appliedAccessToken isEqual:credentials[@"accessToken"]] || self.authorizedGeneration != self.generation) {
+        [self applyCredentials:credentials];
+    }
+}
+- (void)refreshCredentials:(NSDictionary *)credentials {
+    NSString *session = credentials[@"sessionID"];
+    NSString *operation = NSUUID.UUID.UUIDString;
+    self.refreshOperation = operation;
+    __weak typeof(self) weakSelf = self;
+    [self.transport refreshToken:credentials[@"refreshToken"] completion:^(NSDictionary *tokens, NSError *error) {
+        DCServerCommunicator *self = weakSelf;
+        if (!self) return;
+        BOOL currentOperation = [self.refreshOperation isEqual:operation];
+        if (currentOperation) self.refreshOperation = nil;
+        if (![self isCurrentSession:session]) {
+            // Logout/new login won the race. Never restore it with a late refresh completion.
+            // Only the app owns remote revocation: it invalidates every app/user grant and
+            // an asynchronous daemon revocation could invalidate a subsequent login.
+            return;
+        }
+        if (!currentOperation) return;
+        if (error) {
+            if ([error.userInfo[DCSDKAuthenticationFailureKey] boolValue]) [self rejectSession:session];
+            else {
+                self.retryAt = NSDate.date.timeIntervalSince1970 + RetryDelay(error);
+                [Logger Log:@"Discord OAuth refresh failed; retry scheduled."];
+            }
+            return;
+        }
+        NSSet *scopes = [NSSet setWithArray:[tokens[@"scope"] isKindOfClass:NSString.class] ?
+            [tokens[@"scope"] componentsSeparatedByString:@" "] : @[]];
+        if (!NonemptyString(tokens[@"accessToken"]) || !NonemptyString(tokens[@"refreshToken"]) ||
+            ![tokens[@"bearer"] boolValue] || ![tokens[@"expiresIn"] isKindOfClass:NSNumber.class] ||
+            [tokens[@"expiresIn"] doubleValue] <= 0 || !isfinite([tokens[@"expiresIn"] doubleValue]) ||
+            ![scopes containsObject:@"sdk.social_layer_presence"] || ![scopes containsObject:@"openid"]) {
+            [self rejectSession:session];
+            return;
+        }
+        NSDictionary *rotated = @{@"accessToken": tokens[@"accessToken"], @"refreshToken": tokens[@"refreshToken"],
+            @"expiresAt": @(NSDate.date.timeIntervalSince1970 + [tokens[@"expiresIn"] doubleValue]),
+            @"scope": tokens[@"scope"], @"sessionID": session};
+        // Persist the rotated pair under a cross-process compare-and-swap BEFORE giving it to the SDK.
+        if (![IPOAuthStore saveCredentials:rotated replacingSession:session error:NULL]) {
+            if ([self isCurrentSession:session]) [self rejectSession:session];
+            return;
+        }
+        self.forceRefresh = NO;
+        self.retryAt = 0;
+        // serviceCredentials rechecks both account and publishing state before UpdateToken/Connect.
+        [self serviceCredentials];
+    }];
+}
+- (void)applyCredentials:(NSDictionary *)credentials {
+    NSUInteger generation = self.generation;
+    NSString *session = credentials[@"sessionID"];
+    NSString *access = credentials[@"accessToken"];
+    self.updatingToken = YES;
+    if (self.state != DCConnectionStateConnected) self.state = DCConnectionStateConnecting;
+    __weak typeof(self) weakSelf = self;
+    [self.transport updateAccessToken:access completion:^(NSError *error) {
+        DCServerCommunicator *self = weakSelf;
+        if (!self || generation != self.generation) return;
+        self.updatingToken = NO;
+        if (![self isCurrentSession:session] || !self.Active || ![UserPreferences.sharedInstance valOfShowAsDiscordStatus]) {
+            [self resetTransport];
+            return;
+        }
+        if (error) {
+            if ([error.userInfo[DCSDKAuthenticationFailureKey] boolValue]) [self rejectSession:session];
+            else {
+                self.retryAt = NSDate.date.timeIntervalSince1970 + RetryDelay(error);
+                [Logger Log:@"Discord SDK token update failed; retry scheduled."];
+                [self resetTransport];
+            }
+            return;
+        }
+        self.appliedAccessToken = access;
+        self.authorizedGeneration = generation;
+        if (self.state == DCConnectionStateConnected) [self publishPendingActivity];
+        else [self.transport connect];
+    }];
+}
+- (void)sdkStatusChanged:(DCSocialSDKStatus)status authenticationFailure:(BOOL)authenticationFailure {
+    if (!self.Active || ![UserPreferences.sharedInstance valOfShowAsDiscordStatus] ||
+        ![self isCurrentSession:self.observedSession]) {
+        if (status != DCSocialSDKStatusDisconnected) { [self.transport clearPresence]; [self.transport disconnect]; }
+        self.state = DCConnectionStateDisconnected;
+        return;
+    }
+    if (authenticationFailure) { [self rejectSession:self.observedSession]; return; }
+    switch (status) {
+        case DCSocialSDKStatusReady:
+            if (self.authorizedGeneration != self.generation || self.updatingToken) return;
+            if (self.state != DCConnectionStateConnected) [Logger Log:@"Discord SDK ready."];
+            self.state = DCConnectionStateConnected;
+            [NSNotificationCenter.defaultCenter postNotificationName:@"connected" object:self];
+            break;
+        case DCSocialSDKStatusReconnecting:
+            if (self.state != DCConnectionStateReconnecting) [Logger Log:@"Discord SDK reconnecting."];
+            self.state = DCConnectionStateReconnecting;
+            [NSNotificationCenter.defaultCenter postNotificationName:@"disconnected" object:self];
+            break;
+        case DCSocialSDKStatusDisconnected:
+            if (self.state != DCConnectionStateDisconnected) [Logger Log:@"Discord SDK disconnected; retry scheduled."];
+            self.state = DCConnectionStateDisconnected;
+            self.appliedAccessToken = nil;
+            self.authorizedGeneration = 0;
+            self.retryAt = MAX(self.retryAt, NSDate.date.timeIntervalSince1970 + 30);
+            [NSNotificationCenter.defaultCenter postNotificationName:@"disconnected" object:self];
+            break;
+        case DCSocialSDKStatusConnecting: self.state = DCConnectionStateConnecting; break;
+    }
+}
+- (void)publishPendingActivity {
+    if (!self.Active || self.state != DCConnectionStateConnected || self.updatingToken || !self.pendingActivity ||
+        ![self isCurrentSession:self.observedSession] || ![UserPreferences.sharedInstance valOfShowAsDiscordStatus]) return;
+    NSUInteger generation = self.generation, revision = self.presenceRevision;
+    __weak typeof(self) weakSelf = self;
+    [self.transport updateActivity:self.pendingActivity completion:^(NSError *error) {
+        DCServerCommunicator *self = weakSelf;
+        if (!self || generation != self.generation || revision != self.presenceRevision || !error) return;
+        if ([error.userInfo[DCSDKAuthenticationFailureKey] boolValue]) { [self rejectSession:self.observedSession]; return; }
+        if ([error.userInfo[DCSDKRefreshRequiredKey] boolValue]) {
+            self.forceRefresh = YES;
+            [self serviceCredentials];
+            return;
+        }
+        [self.presenceRetryTimer invalidate];
+        [Logger Log:@"Discord activity update failed; retry scheduled."];
+        self.presenceRetryTimer = [NSTimer scheduledTimerWithTimeInterval:RetryDelay(error) repeats:NO block:^(NSTimer *timer) {
+            weakSelf.presenceRetryTimer = nil;
+            [weakSelf publishPendingActivity];
+        }];
+    }];
+}
+- (void)sendActivityJson:(NSNotification *)notification {
+    if (!self.Active || self.state != DCConnectionStateConnected) return;
+    self.presenceRevision++;
+    [self.presenceRetryTimer invalidate];
+    self.presenceRetryTimer = nil;
+    self.pendingActivity = notification.userInfo ? DCActivityForSocialSDK(notification.userInfo) : nil;
+    if (!self.pendingActivity) [self.transport clearPresence];
+    else [self publishPendingActivity];
+}
+- (void)awake:(NSNotification *)notification {
+    if (![UserPreferences.sharedInstance valOfShowAsDiscordStatus] || ![UserPreferences.sharedInstance valOfLinkedAccount]) return;
+    self.Active = YES;
+    [self startCommunicator];
+}
+- (void)sleep:(NSNotification *)notification {
+    self.Active = NO;
+    [self resetTransport];
+}
+- (void)disconnect { [self sleep:nil]; }
 - (void)settingsChanged:(NSNotification *)notification {
-    self.authenticationBlocked = NO;
-    self.reconnectAttempts = 0;
-    [self sleep:nil];
+    [self resetTransport];
+    if (![UserPreferences.sharedInstance valOfShowAsDiscordStatus]) self.Active = NO;
+    [self serviceCredentials];
+}
+- (void)dealloc {
+    [self.callbackTimer invalidate];
+    [self.maintenanceTimer invalidate];
+    [self.presenceRetryTimer invalidate];
+    self.transport.statusChanged = nil;
+    self.transport.tokenExpiring = nil;
 }
 @end

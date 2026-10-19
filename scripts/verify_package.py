@@ -16,8 +16,9 @@ DAEMON = 'var/jb/usr/bin/ipresence-daemon'
 HELPER = 'var/jb/Library/MobileSubstrate/DynamicLibraries/iPresenceHelper'
 LABEL = 'com.kainograze.iPresence-Daemon'
 LAUNCHD = f'var/jb/Library/LaunchDaemons/{LABEL}.plist'
+SDK_BINARY = 'var/jb/Library/Frameworks/discord_partner_sdk.framework/discord_partner_sdk'
 BINARIES = {f'{APP}/iPresence': {'arm64'}, DAEMON: {'arm64'},
-            f'{HELPER}.dylib': {'arm64', 'arm64e'}}
+            f'{HELPER}.dylib': {'arm64', 'arm64e'}, SDK_BINARY: {'arm64'}}
 
 
 class VerificationError(ValueError):
@@ -51,7 +52,7 @@ def validate_control(fields):
     require(fields.get('Package') == 'com.kainograze.ipresence', 'Unexpected package identifier')
     require(bool(fields.get('Version')), 'Package version is missing')
     dependencies = fields.get('Depends', '')
-    require(re.search(r'firmware\s*\(>=\s*15\.0\)', dependencies), 'Missing iOS 15 minimum dependency')
+    require(re.search(r'firmware\s*\(>=\s*15\.1\)', dependencies), 'Missing iOS 15.1 minimum dependency')
     require(re.search(r'firmware\s*\(<<\s*26\.0\.2\)', dependencies), 'Missing iOS 26.0.1 upper boundary')
     for dependency in ('mobilesubstrate', 'uikittools'):
         require(re.search(r'(?:^|,)\s*' + dependency + r'(?:\s|,|$)', dependencies),
@@ -96,7 +97,9 @@ def validate_layout(root):
     info = load_plist(root / APP / 'Info.plist')
     require(info.get('CFBundleExecutable') == 'iPresence', 'App executable differs from packaged binary')
     require(info.get('CFBundleIdentifier') == 'com.kainograze.iPresence', 'Unexpected app bundle identifier')
-    require(info.get('MinimumOSVersion') == '15.0', 'App minimum OS must be 15.0')
+    require(info.get('MinimumOSVersion') == '15.1', 'App minimum OS must be 15.1')
+    require(any('discord-1561870047562043402' in item.get('CFBundleURLSchemes', []) for item in info.get('CFBundleURLTypes', [])), 'Missing Discord OAuth callback scheme')
+    require('discord' in info.get('LSApplicationQueriesSchemes', []), 'Missing Discord query scheme')
     require('arm64' in info.get('UIRequiredDeviceCapabilities', []), 'App must require arm64')
     injection = load_plist(root / (HELPER + '.plist')).get('Filter', {})
     require(injection == {'Bundles': ['com.apple.springboard']}, 'Helper must inject only into SpringBoard')
@@ -114,10 +117,20 @@ def validate_layout(root):
 def validate_load_commands(text, binary, architecture):
     description = f'{binary} ({architecture})'
     versions = re.findall(r'cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (\S+)\s+minos (\S+)', text)
-    require(len(versions) == 1, f'{description}: missing or ambiguous LC_BUILD_VERSION')
-    platform, minimum = versions[0]
-    require(platform in ('2', 'IOS'), f'{description}: not an iOS device binary')
-    require(tuple(map(int, minimum.split('.'))) in ((15, 0), (15, 0, 0)), f'{description}: minimum OS is {minimum}, expected 15.0')
+    if binary == SDK_BINARY:
+        legacy = re.findall(r'cmd LC_VERSION_MIN_IPHONEOS\s+cmdsize \d+\s+version (\S+)', text)
+        require(len(versions) + len(legacy) == 1, f'{description}: ambiguous SDK platform')
+        if legacy:
+            minimum = legacy[0]
+        else:
+            platform, minimum = versions[0]
+            require(platform in ('2', 'IOS'), f'{description}: not an iOS device SDK')
+        require(tuple(map(int, minimum.split('.'))) <= (15, 1, 0), f'{description}: SDK requires newer iOS')
+    else:
+        require(len(versions) == 1, f'{description}: missing or ambiguous LC_BUILD_VERSION')
+        platform, minimum = versions[0]
+        require(platform in ('2', 'IOS'), f'{description}: not an iOS device binary')
+        require(tuple(map(int, minimum.split('.'))) in ((15, 1), (15, 1, 0)), f'{description}: minimum OS is {minimum}, expected 15.1')
     signature = re.search(r'cmd LC_CODE_SIGNATURE\s+cmdsize \d+\s+dataoff (\d+)\s+datasize (\d+)', text)
     require(signature is not None and int(signature[1]) > 0 and int(signature[2]) > 0,
             f'{description}: embedded code signature is missing')
@@ -139,6 +152,9 @@ def verify_binaries(root):
         for architecture in sorted(architectures):
             commands = output('xcrun', 'otool', '-arch', architecture, '-l', path).decode()
             validate_load_commands(commands, relative, architecture)
+        if relative in (f'{APP}/iPresence', DAEMON):
+            require('@rpath/discord_partner_sdk.framework/discord_partner_sdk' in commands, 'Missing SDK dependency')
+            require('path /var/jb/Library/Frameworks (offset' in commands, 'Missing rootless framework search path')
         # ldid signatures are jailbreak signatures, not Apple distribution signatures.
         # LC_CODE_SIGNATURE checks their presence; device trust still requires a jailbreak.
         entitlements = output('ldid', '-e', path).strip()
@@ -152,7 +168,7 @@ def verify_binaries(root):
             require(not parsed, 'Injected helper should inherit host privileges, not carry entitlements')
         require(not parsed.get('get-task-allow') and not parsed.get('task_for_pid-allow'),
                 f'{relative}: unexpected debug entitlement')
-        print(f'  {relative}: {", ".join(sorted(architectures))}; iOS 15.0; embedded signature')
+        print(f'  {relative}: {", ".join(sorted(architectures))}; iOS 15.1; embedded signature')
 
 
 def verify_package(package):

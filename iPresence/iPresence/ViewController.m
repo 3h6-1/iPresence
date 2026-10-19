@@ -1,18 +1,21 @@
 #import "ViewController.h"
+#import "IPDiscordAuthorization.h"
+#import "../../shared/IPOAuthStore.h"
 #import <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <sys/stat.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/com.kainograze.iPresence.plist";
 
 @interface ViewController ()
-@property(nonatomic, strong) UITextField *tokenField;
 @property(nonatomic, strong) UISwitch *enabledSwitch;
 @property(nonatomic, strong) UISwitch *versionSwitch;
+@property(nonatomic, strong) UIButton *signInButton;
+@property(nonatomic, strong) UIButton *signOutButton;
+@property(nonatomic, strong) UILabel *accountLabel;
 @property(nonatomic, strong) UILabel *statusLabel;
-@property(nonatomic, strong) NSMutableDictionary *preferences;
 @end
 
 @implementation ViewController
@@ -31,6 +34,7 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     row.alignment = UIStackViewAlignmentCenter;
     row.spacing = 16;
     [toggle setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [toggle setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     [toggle addTarget:self action:@selector(save) forControlEvents:UIControlEventValueChanged];
     return row;
 }
@@ -39,86 +43,84 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     [super viewDidLoad];
     self.title = @"iPresence";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    // Restrict a legacy settings file before displaying it. Do not follow a symlink.
-    int existing = open(IPPreferencesPath.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
-    BOOL preferencesPrivate = existing < 0 && errno == ENOENT;
-    if (existing >= 0) {
-        struct stat attributes;
-        preferencesPrivate = fstat(existing, &attributes) == 0 && S_ISREG(attributes.st_mode) &&
-            attributes.st_uid == getuid() && fchmod(existing, 0600) == 0;
-        close(existing);
-    }
     NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:IPPreferencesPath];
-    self.preferences = [@{@"showAsDiscordStatus": @NO, @"displayIosVersion": @YES, @"token": @""} mutableCopy];
-    if ([saved isKindOfClass:NSDictionary.class]) [self.preferences addEntriesFromDictionary:saved];
     self.enabledSwitch = [UISwitch new];
-    id enabled = self.preferences[@"showAsDiscordStatus"];
-    self.enabledSwitch.on = [enabled respondsToSelector:@selector(boolValue)] && [enabled boolValue];
+    id enabled = saved[@"showAsDiscordStatus"];
+    self.enabledSwitch.on = [enabled isKindOfClass:NSNumber.class] && [enabled boolValue] && [IPOAuthStore credentials] != nil;
     self.versionSwitch = [UISwitch new];
-    id version = self.preferences[@"displayIosVersion"];
-    self.versionSwitch.on = [version respondsToSelector:@selector(boolValue)] && [version boolValue];
-    self.tokenField = [UITextField new];
-    self.tokenField.borderStyle = UITextBorderStyleRoundedRect;
-    self.tokenField.placeholder = @"Discord token";
-    self.tokenField.secureTextEntry = YES;
-    self.tokenField.autocorrectionType = UITextAutocorrectionTypeNo;
-    self.tokenField.autocapitalizationType = UITextAutocapitalizationTypeNone;
-    self.tokenField.spellCheckingType = UITextSpellCheckingTypeNo;
-    self.tokenField.textContentType = UITextContentTypePassword;
-    self.tokenField.accessibilityLabel = @"Discord token";
-    self.tokenField.text = [self.preferences[@"token"] isKindOfClass:NSString.class] ? self.preferences[@"token"] : @"";
-    self.tokenField.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
-    self.tokenField.adjustsFontForContentSizeCategory = YES;
-    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem];
-    save.configuration = [UIButtonConfiguration filledButtonConfiguration];
-    [save setTitle:@"Save settings" forState:UIControlStateNormal];
-    [save addTarget:self action:@selector(save) forControlEvents:UIControlEventTouchUpInside];
-    self.statusLabel = [self label:@"Install through your rootless package manager, then respring to start the media helper." style:UIFontTextStyleFootnote];
-    if (!preferencesPrivate) self.statusLabel.text = @"Save settings to replace the existing preferences with a private copy. If saving fails, reinstall through your rootless package manager.";
+    id version = saved[@"displayIosVersion"];
+    self.versionSwitch.on = ![version isKindOfClass:NSNumber.class] || [version boolValue];
+    self.accountLabel = [self label:@"" style:UIFontTextStyleBody];
+    self.signInButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.signInButton.configuration = [UIButtonConfiguration filledButtonConfiguration];
+    [self.signInButton addTarget:self action:@selector(signIn) forControlEvents:UIControlEventTouchUpInside];
+    self.signOutButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.signOutButton setTitle:@"Sign out" forState:UIControlStateNormal];
+    [self.signOutButton addTarget:self action:@selector(signOut) forControlEvents:UIControlEventTouchUpInside];
+    self.statusLabel = [self label:@"Sign in, then enable activity sharing when you’re ready." style:UIFontTextStyleFootnote];
     self.statusLabel.textColor = UIColor.secondaryLabelColor;
-    UILabel *description = [self label:@"Share the current music activity from your device with Discord." style:UIFontTextStyleTitle2];
-    UILabel *notice = [self label:@"This preserves the original project's unofficial user-token integration. Discord does not support automated user accounts and may disable them. The token is stored locally with access restricted to the mobile user." style:UIFontTextStyleFootnote];
+    UILabel *description = [self label:@"Share your music activity with Discord." style:UIFontTextStyleTitle2];
+    UILabel *notice = [self label:@"Sign-in uses Discord’s authorization screen. OAuth credentials are stored privately on this device. You control sharing and can sign out at any time." style:UIFontTextStyleFootnote];
     notice.textColor = UIColor.secondaryLabelColor;
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[description, [self row:@"Share listening activity" toggle:self.enabledSwitch], [self row:@"Show iOS version" toggle:self.versionSwitch], self.tokenField, save, self.statusLabel, notice]];
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
+        description, self.accountLabel, self.signInButton, self.signOutButton,
+        [self row:@"Share listening activity" toggle:self.enabledSwitch],
+        [self row:@"Show iOS version" toggle:self.versionSwitch], self.statusLabel, notice
+    ]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 24;
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     UIScrollView *scroll = [UIScrollView new];
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
-    scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
     [self.view addSubview:scroll];
     [scroll addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
         [scroll.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
-        [scroll.bottomAnchor constraintEqualToAnchor:self.view.keyboardLayoutGuide.topAnchor],
+        [scroll.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor],
         [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
         [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor constant:24],
         [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor constant:-24],
         [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor constant:24],
         [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor constant:-24],
-        [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-48],
-        [self.tokenField.heightAnchor constraintGreaterThanOrEqualToConstant:44]
+        [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor constant:-48]
     ]];
+    [self updateAccount];
+    // Never retain the old personal-token integration, including during upgrade.
+    if (saved[@"token"] != nil || ([enabled isKindOfClass:NSNumber.class] && [enabled boolValue] && !self.enabledSwitch.isOn)) {
+        if (![self persistPreferences]) self.statusLabel.text = @"Could not remove the old settings. Reinstall the rootless package and reopen iPresence.";
+    }
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateAccount) name:UIApplicationDidBecomeActiveNotification object:nil];
 }
 
-- (void)save {
-    NSString *token = [(self.tokenField.text ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (self.enabledSwitch.isOn && token.length == 0) {
-        self.statusLabel.text = @"Enter a token before enabling activity sharing.";
-        self.enabledSwitch.on = NO;
-        return;
-    }
-    self.preferences[@"token"] = token;
-    self.preferences[@"showAsDiscordStatus"] = @(self.enabledSwitch.isOn);
-    self.preferences[@"displayIosVersion"] = @(self.versionSwitch.isOn);
-    self.preferences[@"iosVersion"] = UIDevice.currentDevice.systemVersion;
-    NSData *data = [NSPropertyListSerialization dataWithPropertyList:self.preferences format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
-    // mkstemp creates mode 0600 before any token bytes are written; rename is atomic.
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+
+- (void)updateAccount {
+    BOOL signedIn = [IPOAuthStore credentials] != nil;
+    BOOL busy = IPDiscordAuthorization.sharedInstance.busy;
+    self.accountLabel.text = signedIn ? @"Signed in with Discord" : @"Not signed in";
+    [self.signInButton setTitle:signedIn ? @"Sign in again with Discord" : @"Sign in with Discord" forState:UIControlStateNormal];
+    self.signInButton.enabled = !busy;
+    self.signOutButton.hidden = !signedIn;
+    self.signOutButton.enabled = !busy;
+    self.enabledSwitch.enabled = signedIn && !busy;
+    self.versionSwitch.enabled = !busy;
+    if (!signedIn) self.enabledSwitch.on = NO;
+}
+
+- (BOOL)persistPreferences {
+    // This allowlist deliberately excludes legacy personal tokens and all OAuth
+    // credentials. The secure store is the only OAuth credential authority.
+    NSDictionary *settings = @{
+        @"showAsDiscordStatus": @(self.enabledSwitch.isOn),
+        @"displayIosVersion": @(self.versionSwitch.isOn),
+        @"iosVersion": UIDevice.currentDevice.systemVersion
+    };
+    NSData *data = [NSPropertyListSerialization dataWithPropertyList:settings format:NSPropertyListBinaryFormat_v1_0 options:0 error:NULL];
     char *temporaryPath = strdup([[IPPreferencesPath stringByAppendingString:@".XXXXXX"] fileSystemRepresentation]);
     int fd = data && temporaryPath ? mkstemp(temporaryPath) : -1;
     BOOL success = fd >= 0;
-    const unsigned char *bytes = data.bytes;
+    const unsigned char *bytes = (const unsigned char *)data.bytes;
     NSUInteger remaining = data.length;
     while (success && remaining) {
         ssize_t written = write(fd, bytes, remaining);
@@ -134,12 +136,49 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     if (success) success = rename(temporaryPath, IPPreferencesPath.fileSystemRepresentation) == 0;
     if (!success && temporaryPath) unlink(temporaryPath);
     free(temporaryPath);
-    if (!success) {
-        self.statusLabel.text = @"Could not save settings. Install the rootless .deb; a sandboxed or sideloaded app cannot access the shared preferences.";
+    if (success) [IPOAuthStore notifyChanged];
+    return success;
+}
+
+- (void)save {
+    if (self.enabledSwitch.isOn && ![IPOAuthStore credentials]) {
+        self.enabledSwitch.on = NO;
+        self.statusLabel.text = @"Sign in with Discord before enabling sharing.";
         return;
     }
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFSTR("com.kainograze.iPresence.settingsChanged"), NULL, NULL, YES);
-    [self.view endEditing:YES];
-    self.statusLabel.text = self.enabledSwitch.isOn ? @"Saved. Play music to share your activity." : @"Saved. Activity sharing is off.";
+    if (![self persistPreferences]) {
+        self.statusLabel.text = @"Could not save settings. Install the rootless package to share settings with the background service.";
+        return;
+    }
+    self.statusLabel.text = self.enabledSwitch.isOn ? @"Saved. Music activity sharing is on." : @"Saved. Activity sharing is off.";
+}
+
+- (void)signIn {
+    if (IPDiscordAuthorization.sharedInstance.busy) return;
+    // Remove any legacy token before starting a new OAuth grant.
+    if (![self persistPreferences]) {
+        self.statusLabel.text = @"Install the rootless package before signing in. This app needs access to its private shared storage.";
+        return;
+    }
+    self.statusLabel.text = @"Complete sign-in with Discord…";
+    __weak __typeof__(self) weakSelf = self;
+    [IPDiscordAuthorization.sharedInstance signInWithCompletion:^(BOOL success, NSString *message) {
+        [weakSelf updateAccount];
+        weakSelf.statusLabel.text = success && !weakSelf.enabledSwitch.isOn ? @"Signed in. Turn on “Share listening activity” to begin." : message;
+    }];
+    [self updateAccount];
+}
+
+- (void)signOut {
+    if (IPDiscordAuthorization.sharedInstance.busy) return;
+    self.enabledSwitch.on = NO;
+    BOOL settingsSaved = [self persistPreferences];
+    self.statusLabel.text = @"Signing out…";
+    __weak __typeof__(self) weakSelf = self;
+    [IPDiscordAuthorization.sharedInstance signOutWithCompletion:^(BOOL success, NSString *message) {
+        [weakSelf updateAccount];
+        weakSelf.statusLabel.text = settingsSaved ? message : @"Sign-out requested, but settings could not be saved. Reopen the rootless installation to check your account.";
+    }];
+    [self updateAccount];
 }
 @end

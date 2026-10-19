@@ -11,5 +11,6 @@ test:
 	python3 -m unittest discover -s tests -p 'test_*.py' -v
 	bash tests/run-daemon-tests.sh
 	bash tests/run-helper-tests.sh
+	bash tests/run-oauth-store-tests.sh
 clean:
 	python3 -c 'import shutil; shutil.rmtree("build", ignore_errors=True)'

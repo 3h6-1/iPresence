@@ -30,17 +30,39 @@ def main():
         directory.mkdir(parents=True, exist_ok=True)
     STAGE.chmod(0o755)
     common = ['xcrun', '--sdk', 'iphoneos', 'clang', '-isysroot', sdk,
-              '-miphoneos-version-min=15.0', '-fobjc-arc', '-fblocks', '-O2',
+              '-miphoneos-version-min=15.1', '-fobjc-arc', '-fblocks', '-O2',
               '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
               '-Wno-deprecated-declarations', '-framework', 'Foundation', '-framework', 'CoreFoundation']
     app_source = ROOT / 'iPresence/iPresence'
     daemon_source = ROOT / 'iPresence Daemon/iPresence Daemon'
     helper_source = ROOT / 'iPresence Springboard Helper/iPresence Springboard Helper'
-    # CLI/app processes use arm64 on both device families. SpringBoard needs its native arm64e slice.
-    run(*common, '-arch', 'arm64', '-framework', 'UIKit',
-        *(app_source / name for name in ('main.m', 'AppDelegate.m', 'ViewController.m')),
-        '-o', app / 'iPresence')
-    run(*common, '-arch', 'arm64', *sorted(daemon_source.glob('*.m')), '-o', daemon)
+    framework_source = ROOT / 'vendor/discord_social_sdk/lib/release/discord_partner_sdk.xcframework/ios-arm64/discord_partner_sdk.framework'
+    if not (framework_source / 'discord_partner_sdk').is_file():
+        raise SystemExit('Missing official Discord iOS SDK; run scripts/import_sdk.py with your Developer Portal ZIP download')
+    framework = PREFIX / 'Library/Frameworks/discord_partner_sdk.framework'
+    shutil.copytree(framework_source, framework)
+    sdk_binary = framework / 'discord_partner_sdk'
+    # Compile language-specific units separately, then link the C++ SDK wrapper.
+    def build_client(name, source, destination, extra_frameworks=()):
+        objects = []
+        object_dir = BUILD / 'objects' / name
+        object_dir.mkdir(parents=True, exist_ok=True)
+        sources = sorted(source.glob('*.m')) + sorted(source.glob('*.mm')) + [ROOT / 'shared/IPOAuthStore.m']
+        for unit in sources:
+            obj = object_dir / (unit.name + '.o')
+            flags = ['-std=c++20'] if unit.suffix == '.mm' else []
+            run(*common[:-4], '-arch', 'arm64', '-I', ROOT / 'shared',
+                '-isystem', ROOT / 'vendor/discord_social_sdk/include', *flags,
+                '-c', unit, '-o', obj)
+            objects.append(obj)
+        run('xcrun', '--sdk', 'iphoneos', 'clang++', '-isysroot', sdk,
+            '-miphoneos-version-min=15.1', '-arch', 'arm64', *objects,
+            '-framework', 'Foundation', '-framework', 'CoreFoundation',
+            '-F', framework_source.parent, '-framework', 'discord_partner_sdk',
+            '-Wl,-rpath,/var/jb/Library/Frameworks',
+            *[part for item in extra_frameworks for part in ('-framework', item)], '-o', destination)
+    build_client('app', app_source, app / 'iPresence', ('UIKit', 'AuthenticationServices'))
+    build_client('daemon', daemon_source, daemon, ('UIKit',))
     run(*common, '-arch', 'arm64', '-arch', 'arm64e', '-dynamiclib',
         '-Wl,-install_name,@rpath/iPresenceHelper.dylib',
         helper_source / 'iPresence_Springboard_Helper.m', '-o', helper)
@@ -52,9 +74,11 @@ def main():
     shutil.copy2(ROOT / 'LICENSE', license_directory / 'copyright')
     run('ldid', '-S' + str(ROOT / 'packaging/app.entitlements.plist'), app / 'iPresence')
     run('ldid', '-S' + str(ROOT / 'packaging/daemon.entitlements.plist'), daemon)
+    shutil.copy2(ROOT / 'vendor/discord_social_sdk/License-Notices.txt', license_directory / 'Discord-SDK-Notices.txt')
+    run('ldid', '-S', sdk_binary)
     run('ldid', '-S', helper)
     for path in STAGE.rglob('*'):
-        path.chmod(0o755 if path.is_dir() or path in (app / 'iPresence', daemon, helper) else 0o644)
+        path.chmod(0o755 if path.is_dir() or path in (app / 'iPresence', daemon, helper, sdk_binary) else 0o644)
     if not args.package:
         return
     control = STAGE / 'DEBIAN'

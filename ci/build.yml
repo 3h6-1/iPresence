@@ -16,10 +16,5 @@ jobs:
         run: brew install ldid dpkg
       - name: Host regression tests
         run: make test
-      - name: Build and inspect rootless package
-        run: make package
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: iPresence-rootless
-          path: packages/*.deb
-          if-no-files-found: error
+      # Package builds need a locally licensed Social SDK download.
+      # Do not publish the proprietary SDK or linked binaries as CI artifacts.

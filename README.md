@@ -1,193 +1,168 @@
 # iPresence — rootless port
 
-iPresence shares the device's current listening activity with Discord. This fork
-updates the original iOS 5 / 32-bit project with an iOS 15.0 deployment target,
-a modern SpringBoard media observer, a system WebSocket client, and a single
-rootless Debian package containing the app, helper, and background daemon.
+iPresence shares the iPhone's current listening activity with Discord. This fork
+updates the original 32-bit project for arm64 and arm64e rootless jailbreaks.
+Version 2.1 uses the official Discord Social SDK and OAuth2 with PKCE. Sign in
+through Discord's consent screen; iPresence never asks for your personal
+Discord account/session token. It works entirely on the iPhone.
 
 ## Compatibility
 
-The target range is **iOS/iPadOS 15.0–26.0.1 on supported arm64 and arm64e
-rootless jailbreaks**. The package uses the standard `/var/jb` layout used by
-Dopamine and rootless palera1n. It does not provide a jailbreak, bypass device
-support restrictions, or support RootHide's different package format.
+The OAuth package targets **iOS/iPadOS 15.1–26.0.1** on supported arm64 and arm64e
+rootless jailbreaks using `/var/jb`. The current Social SDK's documented minimum
+is iOS 15.1. The earlier 2.0.1 artwork-only build targeted 15.0 but used an
+unofficial personal-token connection; it does not provide the OAuth safety
+improvement. RootHide's different package format is not supported.
 
 | Component | Architecture | Minimum OS |
 | --- | --- | --- |
-| SpringBoard helper | arm64 + arm64e (modern ABI) | iOS 15.0 |
-| Settings app | arm64, runs on both device families | iOS 15.0 |
-| Background daemon | arm64, runs on both device families | iOS 15.0 |
-| Debian package | `iphoneos-arm64` | firmware 15.0 through 26.0.1 |
+| SpringBoard helper | arm64 + arm64e, modern ABI | iOS 15.1 |
+| Settings app and daemon | arm64, runs on both device families | iOS 15.1 |
+| Debian package | `iphoneos-arm64` | firmware 15.1 through 26.0.1 |
 
-**Validation status (2026-10-19):** built and verified with Xcode 27.1 / iPhoneOS
-27.1 SDK, targeting iOS 15.0. All 58 offline daemon checks, the media-helper
-regression suite, and nine packaging tests passed. The settings app also passed
-a launch/layout smoke test in the iOS 18.5 iPhone 16 Pro simulator. No physical
-iOS device was available for local testing. The user has since confirmed that
-the initial build publishes activity successfully on their device; its exact
-model, OS, and jailbreak were not recorded.
-Installation, MediaRemote behavior, tweak injection, and end-to-end Discord
-presence on each OS/jailbreak combination still require the device checks below.
-A successful build is not a claim that every listed OS/device combination has
-been tested.
+The user confirmed the earlier personal-token build publishes activity on their
+phone. **The new OAuth build still needs end-to-end device validation**, including
+sign-in, token refresh, lock-screen playback, and daemon connectivity. Discord
+documents native iOS apps, not jailbreak launch daemons. Compiling against its
+SDK does not establish support for every OS/jailbreak combination, or guarantee
+that background authentication works on a physical device.
 
-The [Dopamine support matrix](https://github.com/opa334/Dopamine) lists the actual
-supported hardware/OS combinations, including a restricted 26.0–26.0.1 range.
-The [palera1n documentation](https://docs.palera.in/) describes its supported
-hardware. Check the jailbreak's own requirements before installing.
+**Local validation (2026-10-19):** the package builds and passes archive/Mach-O
+verification with Xcode 27.1 and the iPhoneOS 27.1 SDK. Nine packaging tests,
+68 offline daemon checks, 121 credential-store checks, and the media-helper
+regression suite pass. The UI and SDK callback loop launch in the iOS 18.5
+simulator; a separate headless simulator SDK initialization probe also exits
+successfully. These checks do not perform Discord authentication or publication.
+
+The package does not provide a jailbreak. Check the actual device and OS support
+of [Dopamine](https://github.com/opa334/Dopamine) or
+[palera1n](https://docs.palera.in/) before installing.
 
 ## Build
 
-Use macOS with full Xcode selected (Xcode 16 or later recommended), its iPhoneOS
-SDK, Python 3, `ldid`, and `dpkg-deb`. A current Apple linker is required for the
-modern arm64e ABI. The root Makefile is the canonical build; Theos and a paid
-Apple signing identity are not required.
+Use macOS with full Xcode selected, an iPhoneOS SDK, Python 3, `ldid`, and
+`dpkg-deb`. A current Apple linker is required for modern arm64e. The root Makefile
+is the canonical build; the original Xcode project files are retained for
+historical reference and do not configure the new SDK integration.
+
+1. Open your application in the Discord Developer Portal, enable Social SDK,
+   and download the native **DiscordSocialSdk** ZIP (tested against 1.10.19337).
+2. Import the licensed SDK locally. It is ignored by Git and not redistributed
+   in this repository:
 
 ```sh
+python3 scripts/import_sdk.py ~/Downloads/DiscordSocialSdk-1.10.19337.zip
 brew install ldid dpkg
 make test
 make package
 ```
 
-The result is
-`packages/com.kainograze.ipresence_2.0.1~rootless1_iphoneos-arm64.deb`.
-`make build` stages signed payloads without making a package; `make verify`
-inspects the existing `.deb`. `make clean` removes the staging/build directory.
-Builds compile with warnings treated as errors. The retired `Websocket/`
-transport is not compiled by either the native build or the updated daemon
-Xcode target.
+Output: `packages/com.kainograze.ipresence_2.1.0~oauth1_iphoneos-arm64.deb`.
+The SDK runtime is signed and installed at
+`/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the app and daemon
+use that rootless framework search path. SDK notices are included in the local
+package. SDK headers and libraries stay under ignored `vendor/`.
 
-`make package` verifies the actual archive, Mach-O architectures, minimum OS,
-code signatures, entitlements, launch daemon, and rootless paths.
+`make build` stages signed payloads, `make verify` inspects the actual `.deb`,
+and `make clean` removes build output. Compilation treats warnings as errors.
+Verification checks archive permissions, architecture, platform, deployment
+target, signatures, entitlements, launchd configuration, OAuth URL scheme, and
+SDK linkage. Host tests do not need the SDK or any Discord credentials.
 
-`ci/build.yml` is a ready-to-enable GitHub Actions template for the same tests
-and package build. Copy it to `.github/workflows/build.yml` using a credential
-with workflow-write permission to enable it. The credential used for this port
-could push source but could not create workflows, so CI has not run remotely.
-The template uploads a `.deb` artifact; it does not publish a release or install
-anything on a device.
+`ci/build.yml` is an inactive host-test workflow template. It needs a credential
+with workflow-write permission to install under `.github/workflows/`. Package
+builds require a separately licensed SDK download and are not published by CI.
+
+## Discord application configuration
+
+This build uses the owner's **iPresence** application, ID
+`1561870047562043402`. Social SDK is enabled, **Public Client** is on, and the
+registered redirect is:
+
+```
+discord-1561870047562043402:/authorize/callback
+```
+
+For another maintained fork, use your own Discord application and change the ID,
+redirect, URL scheme, and artwork URL together in the app, daemon, and tests.
+Never embed a client secret in an iPhone app. The requested scopes are only
+`openid sdk.social_layer_presence`; no message, server, or friend-list access
+is requested.
 
 ## Install and use
 
-1. Transfer the `.deb` to a device with a supported rootless jailbreak and open it
-   in Sileo or Zebra. Let the package manager resolve its dependencies.
-2. Respring when installation completes, so the SpringBoard helper loads.
-3. Open **iPresence**, enter your token, enable **Share listening activity**, and
-   save. Play music in Apple Music or another app publishing system now-playing
-   information.
+1. Transfer the local `.deb` to a supported rootless device and open it in Sileo
+   or Zebra. Let the package manager resolve dependencies, then respring.
+2. Open **iPresence**, choose **Sign in with Discord**, and approve the presence
+   permission in Discord's own login/consent screen.
+3. Enable **Share listening activity** and play music; changes save automatically. No Mac or desktop
+   Discord client is needed. “Signed in” in the app means credentials were saved;
+   confirm actual publication by viewing your Discord activity.
+4. Turn sharing off to stop publishing. Use **Sign out** to remove local OAuth
+   credentials and attempt to revoke authorization. You can also remove iPresence
+   from Discord's **Authorized Apps** settings, especially after an offline sign-out.
 
-The installer registers the app and loads the daemon. The helper publishes
-metadata from SpringBoard using dynamically resolved MediaRemote APIs. If a
-required private API is missing, it disables reporting safely instead of
-preventing SpringBoard from launching. Metadata is refreshed on notifications
-and every 30 seconds. The daemon clears stale helper state after 120 seconds
-(with up to 30 seconds until its next check), and disconnects after five minutes
-without playback.
+Opening the new app removes the legacy token setting. The new daemon never reads
+or uses that personal token, even if an old preference remains before first launch.
+There is no fallback to the old personal-token Gateway transport.
 
-The app is installed under `/var/jb/Applications`. Do not separately sideload
-it as an IPA: a normally sandboxed app cannot read/write the shared settings.
-The daemon runs as **mobile**, not root. Preferences remain in
-`/var/mobile/Library/Preferences/com.kainograze.iPresence.plist`; helper state is
-stored alongside it as `com.kainograze.iPresence-Springboard-Helper.plist`.
-These user-data paths are intentionally not prefixed with `/var/jb`.
+The app must be installed at `/var/jb/Applications` by the package; a normally
+sandboxed sideloaded IPA cannot access the shared state. The daemon runs as
+**mobile**. Settings and helper state remain under
+`/var/mobile/Library/Preferences`, intentionally outside the `/var/jb` prefix.
 
-### Discord integration
-
-This port preserves the original project's unofficial user-token integration.
-It is not a supported Discord OAuth/Rich Presence SDK integration. Discord
-[prohibits automated normal-user accounts](https://support.discord.com/hc/en-us/articles/115002192352-Automated-User-Accounts-Self-Bots)
-and may disable an account using one; service acceptance cannot be guaranteed.
-No token is included in this repository or needed for the build/tests. The app
-writes settings atomically with mode `0600`, masks token entry, and the daemon
-never logs credentials or Gateway payloads. Other software running as mobile or
-root on the jailbroken device can still read the file.
+OAuth access and refresh tokens still exist internally. They are stored in
+`com.kainograze.iPresence.oauth.plist` using private permissions, atomic writes,
+and locking. The daemon alone refreshes them, and a session check prevents a
+late refresh from restoring credentials after sign-out or replacing a newer
+login. Remote authorization revocation is owned by the app, so an old daemon
+request cannot revoke a newer login. Tokens are not printed in logs. This is a private file, not encrypted
+storage: software with mobile/root privileges on a jailbroken device can read it.
 
 ## Activity artwork
 
-Version 2.0.1 sends the supplied red/pink Apple Music image explicitly in
-`assets.large_image`, hosted at this fork's public HTTPS image URL. The previous
-payload only supplied an image tooltip, so Discord fell back to the original
-Discord application's orange icon. Changing the installed iOS app's icon alone
-would not change this artwork. See [artwork provenance](assets/README.md).
+The supplied red/pink Apple Music artwork is explicitly sent as the activity's
+large image. The original payload only supplied a tooltip, causing Discord to
+fall back to the old application's orange icon. The owned iPresence application's
+default icon was also updated. See [artwork provenance](assets/README.md).
 
-The activity now uses the owner's new **iPresence** Discord application
-(`1561870047562043402`), whose default icon was also updated in the Developer
-Portal. This replaces the old application's fallback branding. The explicit
-activity image follows Discord's documented
-[external image URL format](https://docs.discord.com/developers/events/gateway-events#activity-object-activity-asset-image).
+## Account safety and platform limits
 
-## Removing personal account tokens (iPhone only)
-
-**The 2.0.1 artwork update still uses the existing personal-token connection.**
-It does not remove the self-bot policy risk described above.
-
-The supported authentication approach to investigate next is the native
-Discord Social SDK with OAuth2 account linking and PKCE. Users authorize a
-limited scope in Discord's consent screen instead of pasting their personal
-session token. OAuth access and refresh tokens still exist internally; they
-must be stored securely and refreshed by a single process.
-
-Prerequisites:
-
-1. A Discord application owned by the project maintainer, with Social SDK
-   enabled through the Developer Portal.
-2. The official C++ SDK download containing `discord_partner_sdk.xcframework`.
-3. Public-client OAuth configuration and its registered mobile redirect URI.
-4. iOS 15.1 or newer for the current Social SDK. The artwork-only package retains
-   the existing iOS 15.0 deployment target.
-
-The SDK is not bundled and OAuth is not implemented in this build. Discord
-supports unauthenticated Rich Presence on desktop/Android, **not iOS**, so a
-phone-only solution cannot simply omit authentication. A headless iOS daemon
-using the SDK also needs real-device background testing; official SDK platform
-support does not establish support for a jailbreak launch daemon. Using the
-official flow removes the raw-session-token mechanism, but is not a guarantee
-against any account action or a claim of Discord approval.
+The OAuth build removes the personal-account-token self-bot mechanism. Discord
+supports OAuth account linking for native iOS Rich Presence; unauthenticated
+Rich Presence is not available on iOS. Using the official mechanism does not
+mean zero account risk or Discord endorsement of a jailbreak music app.
 
 References: [mobile account linking](https://docs.discord.com/developers/discord-social-sdk/development-guides/account-linking-on-mobile),
-[platform support](https://docs.discord.com/developers/discord-social-sdk/core-concepts/platform-compatibility),
-[Rich Presence authentication](https://docs.discord.com/developers/discord-social-sdk/development-guides/setting-rich-presence#rich-presence-without-authentication).
+[SDK platform support](https://docs.discord.com/developers/discord-social-sdk/core-concepts/platform-compatibility),
+[Rich Presence](https://docs.discord.com/developers/discord-social-sdk/development-guides/setting-rich-presence),
+[Developer Policy](https://support-dev.discord.com/hc/en-us/articles/8563934450327-Discord-Developer-Policy).
 
-## Device validation checklist
+## Device validation
 
-Run this on representative arm64 and arm64e devices for each OS range you intend
-to distribute to. Record device model, OS build, jailbreak version, package
-version, and the results; **a per-version device matrix has not yet been recorded**.
+Record the device model, OS build, jailbreak, and package version. Check:
 
-- Install/upgrade/remove through the package manager. Confirm the app appears,
-  launches after a respring, and the daemon runs as mobile without a crash loop.
+- Sign in, cancel sign-in, sign out, and reauthorize. Disable sharing while music
+  plays; the activity should clear. Re-enable it and verify current playback.
+- Play, pause, seek, switch tracks and media apps, and play a live stream. Verify
+  title/artist/album, red/pink artwork, remaining time, and clearing on pause.
+- Lock the screen, respring, reboot/re-jailbreak, and switch between Wi-Fi and
+  cellular. Confirm the daemon reconnects and restores current activity.
+- Leave the account linked through token expiry and check automatic refresh.
+  Sign out while a refresh or connection is in progress; it must stay signed out.
 - Inspect `launchctl print system/com.kainograze.iPresence-Daemon` from a device
-  root shell. Check the system log for iPresence lifecycle errors.
-- Start, pause, resume, seek, change track, switch media apps, and play a live
-  stream. Verify title/artist/album, remaining duration, and clearing on pause.
-- Lock the screen, respring, restart the media service, then reboot and
-  re-jailbreak. Playback reporting should recover, and old state should expire.
-- Disable sharing, enable it while playback is already active, replace the
-  token, and test an invalid token. Invalid authentication should stop repeated
-  reconnect attempts until settings are changed.
-- Test Wi-Fi/cellular transitions, airplane mode, and sleep/wake. Verify resumed
-  sessions continue heartbeats and refresh the activity.
-- Confirm the settings and helper-state files are owned by mobile, mode `0600`,
-  and logs do not contain credentials. Removal preserves preferences; clear the
-  token and save before uninstalling if you want to discard it.
+  root shell for a crash loop. Share only lifecycle errors, never token files.
+- Sign out before uninstalling to discard local credentials. Package removal
+  preserves user preferences.
 
-## Implementation and references
-
-- Runtime-resolved MediaRemote functions avoid link-time dependency on a
-  private framework and avoid hooks into version-specific SpringBoard classes.
-- `NSURLSessionWebSocketTask` uses platform TLS trust validation. Gateway v10
-  handles Hello, heartbeat/ACK, server heartbeat requests, resumable sessions,
-  invalid sessions, fatal authentication closes, and reconnect backoff.
-- Missing/invalid preferences fail closed; state and activity parsing tolerate
-  absent metadata and live streams. Presence updates are coalesced.
-- Installed payloads are under `/var/jb`; the helper's install name uses
-  `@rpath`. Only Apple system frameworks are linked, so no third-party rootful
-  library paths are embedded.
-
-References: [Theos rootless packaging](https://theos.dev/docs/rootless),
-[arm64e ABI](https://theos.dev/docs/arm64e-deployment),
-[MediaRemote declarations](https://github.com/theos/headers/blob/master/MediaRemote/MediaRemote.h),
-[Discord Gateway](https://docs.discord.com/developers/events/gateway).
+The helper resolves MediaRemote APIs at runtime, checks required symbols,
+reports every 30 seconds, and avoids SpringBoard class hooks. The daemon expires
+stale playback after 120 seconds (plus its next poll), coalesces updates, clears
+paused activity, and disconnects after five idle minutes. SDK timestamps are
+converted from the helper's milliseconds to Unix seconds.
 
 Original project by [kainograze](https://github.com/kainograze/iPresence).
-The original GPL-2.0 license is retained; see [LICENSE](LICENSE).
+The original GPL-2.0 license is retained; see [LICENSE](LICENSE). Discord's SDK
+is separately licensed under its own terms, is not covered by this repository's
+GPL license, and is not committed here. Local SDK-linked packages are for the
+SDK license holder's testing; no combined binary release is published here.

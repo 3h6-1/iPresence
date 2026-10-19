@@ -1,4 +1,5 @@
 #import "UserPreferences.h"
+#import "IPOAuthStore.h"
 
 static void PreferencesChanged(CFNotificationCenterRef center, void *observer, CFStringRef name,
                                const void *object, CFDictionaryRef userInfo) {
@@ -30,10 +31,7 @@ static void PreferencesChanged(CFNotificationCenterRef center, void *observer, C
     self.settings = [NSDictionary dictionaryWithContentsOfFile:self.pathToSettings] ?: @{};
 }
 
-- (NSString *)valOfToken {
-    id token = self.settings[@"token"];
-    return [token isKindOfClass:NSString.class] ? [token stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : nil;
-}
+- (BOOL)valOfLinkedAccount { return [IPOAuthStore credentials] != nil; }
 - (BOOL)valOfShowAsDiscordStatus {
     id value = self.settings[@"showAsDiscordStatus"];
     return [value isKindOfClass:NSNumber.class] && [value boolValue];

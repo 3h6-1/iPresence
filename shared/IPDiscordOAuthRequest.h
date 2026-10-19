@@ -22,6 +22,7 @@ typedef NS_ENUM(NSInteger, IPDiscordOAuthRequestErrorCode) {
 @property(nonatomic, copy, readonly) NSString *verifier;
 @property(nonatomic, copy, readonly) NSString *challenge;
 @property(nonatomic, copy, readonly) NSURL *authorizationURL;
+@property(nonatomic, copy, readonly) NSURL *nativeAuthorizationURL;
 - (nullable NSString *)authorizationCodeFromURL:(NSURL *)URL
                                          error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSURLRequest *)tokenRequestForCode:(NSString *)code;

@@ -50,6 +50,20 @@ int main(void) {
         CHECK([fields[@"scope"] isEqual:@"openid sdk.social_layer_presence"], "Only documented minimum SDK bundle is requested");
         CHECK(![request.authorizationURL.absoluteString containsString:request.verifier], "Verifier never enters authorization URL");
 
+        NSURLComponents *native = [NSURLComponents componentsWithURL:request.nativeAuthorizationURL resolvingAgainstBaseURL:NO];
+        NSDictionary *nativeFields = Query(request.nativeAuthorizationURL);
+        CHECK([native.scheme isEqual:@"discord"] && [native.host isEqual:@"view"] &&
+              [native.path isEqual:@"/oauth2/authorize"], "Native handoff uses the official SDK's captured Discord route");
+        CHECK(nativeFields.count == 7 && [nativeFields[@"client_id"] isEqual:fields[@"client_id"]] &&
+              [nativeFields[@"response_type"] isEqual:@"code"] && [nativeFields[@"scope"] isEqual:fields[@"scope"]] &&
+              [nativeFields[@"state"] isEqual:request.state] && [nativeFields[@"redirect_uri"] isEqual:fields[@"redirect_uri"]],
+              "Native handoff preserves the same attempt, scopes, and registered redirect");
+        CHECK([nativeFields[@"code_method"] isEqual:@"S256"] && [nativeFields[@"code_challenge"] isEqual:request.challenge] &&
+              nativeFields[@"code_challenge_method"] == nil && nativeFields[@"prompt"] == nil,
+              "Native PKCE parameter names match the official SDK's captured seven-field request");
+        CHECK(![request.nativeAuthorizationURL.absoluteString containsString:request.verifier],
+              "Native handoff never exposes the private verifier");
+
         NSError *error = [NSError errorWithDomain:@"old" code:1 userInfo:nil];
         NSString *validQuery = [NSString stringWithFormat:@"code=good-code&state=%@", request.state];
         NSURL *callback = Callback(validQuery);

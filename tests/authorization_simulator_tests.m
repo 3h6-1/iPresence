@@ -1,5 +1,5 @@
 // Offline integration fixture. This file is never linked into packaged builds.
-// Both the web session and all HTTP transport are replaced; no Discord traffic.
+// Native handoff, web sessions, and all HTTP transport are replaced; no Discord traffic.
 #import <UIKit/UIKit.h>
 #import <AuthenticationServices/AuthenticationServices.h>
 #import <objc/runtime.h>
@@ -7,24 +7,33 @@
 #import "AppDelegate.h"
 #import "ViewController.h"
 #import "IPOAuthStore.h"
+#import "IPDiagnostics.h"
 #import "IPDiscordOAuthRequest.h"
 
 @interface IPDiscordAuthorization (RoutingHarness)
 - (ASWebAuthenticationSession *)newWebSessionWithURL:(NSURL *)url completion:(ASWebAuthenticationSessionCompletionHandler)completion;
 - (NSURLSession *)newNetworkSession;
 - (void)checkDeadline;
+- (BOOL)canOpenDiscord;
+- (void)openDiscordURL:(NSURL *)url completion:(void (^)(BOOL))completion;
+- (void)signInUsingBrowserWithCompletion:(void (^)(BOOL, NSString *))completion;
 @end
 static NSDictionary *AuthorizationFields;
 static NSString *Scenario;
 static NSUInteger TokenRequests, Completions, DelegateCalls, WebStarts;
-static BOOL RequestValidated = YES, DelegateAccepted;
+static NSUInteger NativeOpens, NativeAvailabilityChecks;
+static BOOL RequestValidated = YES, DelegateAccepted, NativeRequestValidated = YES, BrowsersEphemeral = YES;
 static ASWebAuthenticationSessionCompletionHandler StaleCompletion;
+static void (^StaleNativeCompletion)(BOOL);
+static NSURL *StaleNativeCallback;
 @interface ViewController (RoutingHarness)
 - (void)signIn;
+- (void)signInUsingBrowser;
 - (BOOL)persistPreferences;
 @end
 static void BeginSignIn(void);
 static void (*OriginalSignIn)(id, SEL, void (^)(BOOL, NSString *));
+static void (*OriginalBrowserSignIn)(id, SEL, void (^)(BOOL, NSString *));
 static BOOL FixturePreferences(id self, SEL command) { return YES; }
 static ViewController *Controller(void) {
     UINavigationController *navigation = (UINavigationController *)UIApplication.sharedApplication.delegate.window.rootViewController;
@@ -54,17 +63,21 @@ static void ForceTimeout(void) {
     [IPDiscordAuthorization.sharedInstance setValue:@0 forKey:@"deadline"];
     [IPDiscordAuthorization.sharedInstance checkDeadline];
 }
+static NSURL *CallbackForFields(NSDictionary *fields) {
+    NSURLComponents *callback = [NSURLComponents componentsWithString:fields[@"redirect_uri"]];
+    BOOL denied = [Scenario isEqualToString:@"denied"];
+    callback.queryItems = @[[NSURLQueryItem queryItemWithName:denied ? @"error" : @"code" value:denied ? @"access_denied" : @"synthetic-code-not-real"],
+                            [NSURLQueryItem queryItemWithName:@"state" value:fields[@"state"]]];
+    return callback.URL;
+}
 @interface IPFakeWebSession : ASWebAuthenticationSession
 @property(nonatomic, copy) ASWebAuthenticationSessionCompletionHandler fakeCompletion;
 @end
 @implementation IPFakeWebSession
 - (BOOL)start {
     WebStarts++;
-    NSURLComponents *callback = [NSURLComponents componentsWithString:AuthorizationFields[@"redirect_uri"]];
-    BOOL denied = [Scenario isEqualToString:@"denied"];
-    callback.queryItems = @[[NSURLQueryItem queryItemWithName:denied ? @"error" : @"code" value:denied ? @"access_denied" : @"synthetic-code-not-real"],
-                            [NSURLQueryItem queryItemWithName:@"state" value:AuthorizationFields[@"state"]]];
-    NSURL *callbackURL = callback.URL;
+    BrowsersEphemeral &= self.prefersEphemeralWebBrowserSession;
+    NSURL *callbackURL = CallbackForFields(AuthorizationFields);
     WriteJSON(@"AuthFixture.json", @{@"callbackURL": callbackURL.absoluteString, @"scenario": Scenario, @"ready": @YES});
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         if ([Scenario isEqualToString:@"cancel"]) {
@@ -99,6 +112,53 @@ static void ForceTimeout(void) {
     if (self.fakeCompletion) self.fakeCompletion(nil, [NSError errorWithDomain:ASWebAuthenticationSessionErrorDomain code:ASWebAuthenticationSessionErrorCodeCanceledLogin userInfo:nil]);
 }
 @end
+
+static BOOL FakeCanOpenDiscord(id self, SEL command) {
+    NativeAvailabilityChecks++;
+    return [Scenario hasPrefix:@"native-"] || [Scenario isEqualToString:@"browser-explicit"];
+}
+static void FakeOpenDiscord(id self, SEL command, NSURL *url, void (^completion)(BOOL)) {
+    NativeOpens++;
+    AuthorizationFields = Fields(url.query ?: @"");
+    NativeRequestValidated &= [url.scheme isEqualToString:@"discord"] && [url.host isEqualToString:@"view"] &&
+        [url.path isEqualToString:@"/oauth2/authorize"] && AuthorizationFields.count == 7 &&
+        [AuthorizationFields[@"client_id"] isEqualToString:@"1561870047562043402"] &&
+        [AuthorizationFields[@"response_type"] isEqualToString:@"code"] &&
+        [AuthorizationFields[@"scope"] isEqualToString:@"openid sdk.social_layer_presence"] &&
+        [AuthorizationFields[@"code_method"] isEqualToString:@"S256"] &&
+        [AuthorizationFields[@"redirect_uri"] isEqualToString:@"discord-1561870047562043402:/authorize/callback"] &&
+        [AuthorizationFields[@"state"] length] == 43 && [AuthorizationFields[@"code_challenge"] length] == 43 &&
+        AuthorizationFields[@"code_challenge_method"] == nil;
+    NSURL *callbackURL = CallbackForFields(AuthorizationFields);
+    WriteJSON(@"AuthFixture.json", @{@"callbackURL": callbackURL.absoluteString, @"scenario": Scenario, @"ready": @YES, @"native": @YES});
+    NSUInteger invocation = NativeOpens;
+    if ([Scenario isEqualToString:@"native-stale-open"] && invocation == 1) {
+        StaleNativeCompletion = [completion copy];
+        StaleNativeCallback = callbackURL;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+            [IPDiscordAuthorization.sharedInstance cancelSignIn];
+        });
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        if ([Scenario isEqualToString:@"native-open-failure"]) {
+            completion(NO); // Production must fall back to the mocked ephemeral browser.
+            return;
+        }
+        if ([Scenario isEqualToString:@"native-stale-open"] && invocation == 2) {
+            StaleNativeCompletion(NO); // Must not launch a browser for the cancelled generation.
+            if (DeliverURL(StaleNativeCallback) || !IPDiscordAuthorization.sharedInstance.busy) abort();
+        }
+        completion(YES);
+        // UIApplication's completion is asynchronous in production. Give its
+        // main-queue handling time to settle before the simulated return URL.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([Scenario isEqualToString:@"native-cancel"]) [IPDiscordAuthorization.sharedInstance cancelSignIn];
+            else if ([Scenario isEqualToString:@"native-timeout"]) ForceTimeout();
+            DeliverURL(callbackURL);
+        });
+    });
+}
 
 @interface IPAuthMockProtocol : NSURLProtocol
 @property(atomic) BOOL stopped;
@@ -163,10 +223,11 @@ static NSURLSession *FakeNetwork(id self, SEL command) {
     return [NSURLSession sessionWithConfiguration:configuration];
 }
 static void ObserveSignIn(id self, SEL selector, void (^completion)(BOOL, NSString *)) {
-    OriginalSignIn(self, selector, ^(BOOL success, NSString *message) {
+    void (*original)(id, SEL, void (^)(BOOL, NSString *)) = selector == @selector(signInUsingBrowserWithCompletion:) ? OriginalBrowserSignIn : OriginalSignIn;
+    original(self, selector, ^(BOOL success, NSString *message) {
         if (completion) completion(success, message);
         Completions++;
-        if ([Scenario isEqualToString:@"retry"] && Completions == 1) {
+        if (([Scenario isEqualToString:@"retry"] || [Scenario isEqualToString:@"native-stale-open"]) && Completions == 1) {
             if (success || IPDiscordAuthorization.sharedInstance.busy || [IPOAuthStore credentials]) abort();
             dispatch_async(dispatch_get_main_queue(), ^{ BeginSignIn(); });
             return;
@@ -177,9 +238,13 @@ static void ObserveSignIn(id self, SEL selector, void (^completion)(BOOL, NSStri
                 @"scenario": Scenario, @"success": @(success), @"busy": @(IPDiscordAuthorization.sharedInstance.busy),
                 @"tokenRequests": @(TokenRequests), @"requestValidated": @(RequestValidated), @"completions": @(Completions),
                 @"delegateCalls": @(DelegateCalls), @"delegateAccepted": @(DelegateAccepted),
+                @"webStarts": @(WebStarts), @"browsersEphemeral": @(BrowsersEphemeral),
+                @"nativeOpens": @(NativeOpens), @"nativeAvailabilityChecks": @(NativeAvailabilityChecks),
+                @"nativeRequestValidated": @(NativeRequestValidated),
                 @"storedSynthetic": @([credentials[@"accessToken"] isEqualToString:@"synthetic-access-not-a-real-token"]),
                 @"message": message,
                 @"signInEnabled": @([[Controller() valueForKey:@"signInButton"] isEnabled]),
+                @"browserSignInEnabled": @([[Controller() valueForKey:@"browserSignInButton"] isEnabled]),
                 @"cancelHidden": @([[Controller() valueForKey:@"cancelSignInButton"] isHidden]),
                 @"sharingEnabled": @([[Controller() valueForKey:@"enabledSwitch"] isOn]),
                 @"statusText": [[Controller() valueForKey:@"statusLabel"] text] ?: @""
@@ -188,12 +253,21 @@ static void ObserveSignIn(id self, SEL selector, void (^completion)(BOOL, NSStri
         });
     });
 }
-static void BeginSignIn(void) { [Controller() signIn]; }
+static void BeginSignIn(void) {
+    if ([Scenario isEqualToString:@"browser-explicit"]) [Controller() signInUsingBrowser];
+    else [Controller() signIn];
+}
 __attribute__((constructor)) static void InstallRoutingHarness(void) {
+    NSString *diagnosticsDirectory = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/DiagnosticsFixture"];
+    [NSFileManager.defaultManager createDirectoryAtPath:diagnosticsDirectory withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0700} error:NULL];
+    [IPDiagnostics setDirectoryForTesting:diagnosticsDirectory];
     OriginalSignIn = (typeof(OriginalSignIn))method_setImplementation(class_getInstanceMethod(IPDiscordAuthorization.class, @selector(signInWithCompletion:)), (IMP)ObserveSignIn);
+    OriginalBrowserSignIn = (typeof(OriginalBrowserSignIn))method_setImplementation(class_getInstanceMethod(IPDiscordAuthorization.class, @selector(signInUsingBrowserWithCompletion:)), (IMP)ObserveSignIn);
     method_setImplementation(class_getInstanceMethod(ViewController.class, @selector(persistPreferences)), (IMP)FixturePreferences);
     method_setImplementation(class_getInstanceMethod(IPDiscordAuthorization.class, @selector(newWebSessionWithURL:completion:)), (IMP)FakeWeb);
     method_setImplementation(class_getInstanceMethod(IPDiscordAuthorization.class, @selector(newNetworkSession)), (IMP)FakeNetwork);
+    method_setImplementation(class_getInstanceMethod(IPDiscordAuthorization.class, @selector(canOpenDiscord)), (IMP)FakeCanOpenDiscord);
+    method_setImplementation(class_getInstanceMethod(IPDiscordAuthorization.class, @selector(openDiscordURL:completion:)), (IMP)FakeOpenDiscord);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         Scenario = NSProcessInfo.processInfo.environment[@"IP_AUTH_TEST_SCENARIO"] ?: @"success";
         NSString *directory = FixturePath(@"OAuthFixtureStore");

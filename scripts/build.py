@@ -5,6 +5,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from app_icons import stage_icons
+
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / 'build'
 STAGE = BUILD / 'stage'
@@ -18,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--package', action='store_true')
     args = parser.parse_args()
-    for tool in ('xcrun', 'ldid') + (('dpkg-deb',) if args.package else ()):
+    for tool in ('xcrun', 'ldid', 'sips') + (('dpkg-deb',) if args.package else ()):
         if not shutil.which(tool):
             raise SystemExit(f'Missing {tool}; see README.md build requirements')
     sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
@@ -49,7 +51,8 @@ def main():
         object_dir.mkdir(parents=True, exist_ok=True)
         sources = sorted(source.glob('*.m')) + sorted(source.glob('*.mm')) + [ROOT / 'shared/IPOAuthStore.m']
         if name == 'app':
-            sources += [ROOT / 'shared/IPAuthorizationAttempt.m', ROOT / 'shared/IPDiscordOAuthRequest.m']
+            sources += [ROOT / 'shared/IPAuthorizationAttempt.m', ROOT / 'shared/IPDiscordOAuthRequest.m',
+                        ROOT / 'shared/IPDiagnostics.m']
         for unit in sources:
             obj = object_dir / (unit.name + '.o')
             flags = ['-std=c++20'] if unit.suffix == '.mm' else []
@@ -69,6 +72,7 @@ def main():
         '-Wl,-install_name,@rpath/iPresenceHelper.dylib',
         helper_source / 'iPresence_Springboard_Helper.m', '-o', helper)
     shutil.copy2(app_source / 'iPresence-Info.plist', app / 'Info.plist')
+    stage_icons(ROOT / 'assets/ipresence-icon.png', app)
     shutil.copy2(helper_source / 'iPresence-Springboard-Helper.plist', helper.with_suffix('.plist'))
     shutil.copy2(ROOT / 'packaging/com.kainograze.iPresence-Daemon.plist', PREFIX / 'Library/LaunchDaemons/com.kainograze.iPresence-Daemon.plist')
     license_directory = PREFIX / 'usr/share/doc/com.kainograze.ipresence'

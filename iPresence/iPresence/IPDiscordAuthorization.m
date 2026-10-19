@@ -2,6 +2,7 @@
 #import "../../shared/IPOAuthStore.h"
 #import "../../shared/IPAuthorizationAttempt.h"
 #import "../../shared/IPDiscordOAuthRequest.h"
+#import "../../shared/IPDiagnostics.h"
 #import <AuthenticationServices/AuthenticationServices.h>
 #import <UIKit/UIKit.h>
 #import <math.h>
@@ -16,6 +17,8 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
 @property(nonatomic, strong) NSURLSessionDataTask *networkTask;
 @property(nonatomic, strong) NSTimer *watchdog;
 @property(nonatomic) NSTimeInterval deadline;
+@property(nonatomic) NSTimeInterval startedAt;
+@property(nonatomic, copy) NSString *signInMethod;
 @property(nonatomic, copy) void (^completion)(BOOL, NSString *);
 @end
 
@@ -29,8 +32,10 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
 - (instancetype)init {
     if ((self = [super init])) {
         _attempt = [IPAuthorizationAttempt new];
-        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(checkDeadline)
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(didBecomeActive)
             name:UIApplicationDidBecomeActiveNotification object:nil];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(didEnterBackground)
+            name:UIApplicationDidEnterBackgroundNotification object:nil];
     }
     return self;
 }
@@ -40,11 +45,28 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
 }
 - (NSString *)progressMessage {
     switch (self.attempt.phase) {
-        case IPAuthorizationPhaseAuthorizing: return @"Complete sign-in in the secure Discord window…";
+        case IPAuthorizationPhaseAuthorizing: return [self.signInMethod isEqualToString:@"native"] ?
+            @"Approve sign-in in Discord. You can cancel here if you need to try again." :
+            @"Complete sign-in in the secure Discord window…";
         case IPAuthorizationPhaseExchanging: return @"Finishing Discord sign-in…";
         case IPAuthorizationPhaseRevoking: return @"Signing out…";
         default: return nil;
     }
+}
+- (NSString *)phaseName {
+    switch (self.attempt.phase) {
+        case IPAuthorizationPhaseAuthorizing: return @"authorizing";
+        case IPAuthorizationPhaseExchanging: return @"exchanging";
+        case IPAuthorizationPhaseRevoking: return @"revoking";
+        default: return @"idle";
+    }
+}
+- (void)didBecomeActive {
+    [IPDiagnostics recordEvent:@"foreground" fields:@{@"phase": self.phaseName}];
+    [self checkDeadline];
+}
+- (void)didEnterBackground {
+    [IPDiagnostics recordEvent:@"background" fields:@{@"phase": self.phaseName}];
 }
 - (void)notifyState {
     [NSNotificationCenter.defaultCenter postNotificationName:IPDiscordAuthorizationStateDidChangeNotification object:self];
@@ -56,6 +78,12 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
     return [self presentationWindow];
 }
 // Small factories allow simulator tests to replace the browser and HTTP transport.
+- (BOOL)canOpenDiscord {
+    return [UIApplication.sharedApplication canOpenURL:[NSURL URLWithString:@"discord://"]];
+}
+- (void)openDiscordURL:(NSURL *)url completion:(void (^)(BOOL))completion {
+    [UIApplication.sharedApplication openURL:url options:@{} completionHandler:completion];
+}
 - (ASWebAuthenticationSession *)newWebSessionWithURL:(NSURL *)url completion:(ASWebAuthenticationSessionCompletionHandler)completion {
     return [[ASWebAuthenticationSession alloc] initWithURL:url
         callbackURLScheme:[NSURL URLWithString:[IPDiscordOAuthRequest redirectURI]].scheme completionHandler:completion];
@@ -73,6 +101,7 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
     willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request
     completionHandler:(void (^)(NSURLRequest *))completionHandler {
     // OAuth codes and tokens must never follow a redirect to another destination.
+    [IPDiagnostics recordEvent:@"redirect_blocked" fields:@{@"http_status": @(response.statusCode)}];
     completionHandler(nil);
 }
 - (void)armDeadline:(NSTimeInterval)interval {
@@ -87,6 +116,7 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
 - (void)checkDeadline {
     if (!self.busy || NSProcessInfo.processInfo.systemUptime < self.deadline) return;
     if (self.canCancelSignIn) {
+        [IPDiagnostics recordEvent:@"signin_timed_out" fields:@{@"phase": self.phaseName}];
         [self finish:self.attempt.generation success:NO message:@"Sign-in timed out. Please try again."];
     } else {
         // Wait for NSURLSession's cancellation completion before allowing a new
@@ -95,10 +125,15 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
     }
 }
 - (void)finish:(NSUInteger)generation success:(BOOL)success message:(NSString *)message {
+    NSString *phase = self.phaseName;
     if (![self.attempt finish:generation]) return;
+    [IPDiagnostics recordEvent:[phase isEqualToString:@"revoking"] ? @"sign_out_finish" : @"signin_finished"
+        fields:@{@"success": @(success), @"phase": phase,
+        @"duration_ms": @((NSInteger)((NSProcessInfo.processInfo.systemUptime - self.startedAt) * 1000))}];
     void (^completion)(BOOL, NSString *) = self.completion;
     self.completion = nil;
     self.request = nil;
+    self.signInMethod = nil;
     self.deadline = 0;
     [self.watchdog invalidate];
     self.watchdog = nil;
@@ -114,24 +149,59 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
 }
 - (void)cancelSignIn {
     if (!self.canCancelSignIn) return;
+    [IPDiagnostics recordEvent:@"signin_cancelled" fields:@{@"phase": self.phaseName}];
     // Invalidate the attempt before cancelling either callback source.
     [self finish:self.attempt.generation success:NO message:@"Sign-in cancelled."];
 }
 - (void)signInWithCompletion:(void (^)(BOOL, NSString *))completion {
+    [self signInPreferringBrowser:NO completion:completion];
+}
+- (void)signInUsingBrowserWithCompletion:(void (^)(BOOL, NSString *))completion {
+    [self signInPreferringBrowser:YES completion:completion];
+}
+- (void)signInPreferringBrowser:(BOOL)preferBrowser completion:(void (^)(BOOL, NSString *))completion {
     NSAssert(NSThread.isMainThread, @"Authorization runs on the main thread");
     NSUInteger generation = [self.attempt beginSignIn];
     if (!generation) { completion(NO, @"An account request is already in progress."); return; }
+    self.startedAt = NSProcessInfo.processInfo.systemUptime;
     self.completion = completion;
     self.request = [IPDiscordOAuthRequest new];
     if (!self.request || ![self presentationWindow]) {
         [self finish:generation success:NO message:@"Could not start secure sign-in. Please try again."];
         return;
     }
+    BOOL discordAvailable = [self canOpenDiscord];
+    BOOL native = !preferBrowser && discordAvailable;
+    self.signInMethod = native ? @"native" : @"isolated_browser";
+    [IPDiagnostics recordEvent:@"signin_started" fields:@{@"method": self.signInMethod, @"can_open_discord": @(discordAvailable)}];
+    [self armDeadline:300];
+    [self notifyState];
+    if (!native) {
+        [self startBrowserForGeneration:generation];
+        return;
+    }
+    __weak typeof(self) weakSelf = self;
+    [self openDiscordURL:self.request.nativeAuthorizationURL completion:^(BOOL opened) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            IPDiscordAuthorization *self = weakSelf;
+            // A late open result must not launch a browser for a cancelled attempt.
+            if (!self || self.attempt.generation != generation || self.attempt.phase != IPAuthorizationPhaseAuthorizing) return;
+            [IPDiagnostics recordEvent:@"native_open_result" fields:@{@"success": @(opened)}];
+            if (!opened) [self startBrowserForGeneration:generation];
+        });
+    }];
+}
+- (void)startBrowserForGeneration:(NSUInteger)generation {
+    if (self.attempt.generation != generation || self.attempt.phase != IPAuthorizationPhaseAuthorizing) return;
+    self.signInMethod = @"isolated_browser";
     __weak typeof(self) weakSelf = self;
     self.webSession = [self newWebSessionWithURL:self.request.authorizationURL completion:^(NSURL *callbackURL, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             IPDiscordAuthorization *self = weakSelf;
             if (!self || self.attempt.generation != generation || self.attempt.phase != IPAuthorizationPhaseAuthorizing) return;
+            NSMutableDictionary *fields = [[IPDiagnostics fieldsForError:error] mutableCopy];
+            fields[@"callback_present"] = @(callbackURL != nil);
+            [IPDiagnostics recordEvent:@"auth_browser_completion" fields:fields];
             if (error || !callbackURL) {
                 BOOL cancelled = [error.domain isEqualToString:ASWebAuthenticationSessionErrorDomain] && error.code == ASWebAuthenticationSessionErrorCodeCanceledLogin;
                 [self finish:generation success:NO message:cancelled ? @"Sign-in cancelled." : @"Discord sign-in could not finish. Please try again."];
@@ -141,22 +211,28 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
         });
     }];
     self.webSession.presentationContextProvider = self;
-    self.webSession.prefersEphemeralWebBrowserSession = NO;
+    // A fresh browser session avoids carrying stale Discord site state into retries.
+    self.webSession.prefersEphemeralWebBrowserSession = YES;
     [self armDeadline:300];
     [self notifyState];
-    if (![self.webSession start]) [self finish:generation success:NO message:@"Could not open Discord sign-in. Please try again."];
+    BOOL started = [self.webSession start];
+    [IPDiagnostics recordEvent:@"browser_started" fields:@{@"success": @(started), @"ephemeral": @YES}];
+    if (!started) [self finish:generation success:NO message:@"Could not open Discord sign-in. Please try again."];
 }
 - (BOOL)handleOpenURL:(NSURL *)url {
     // Explicit UIKit delivery covers a browser/Discord app handoff; the normal
     // ASWebAuthenticationSession completion uses the exact same validated path.
+    [IPDiagnostics recordEvent:@"callback_received" fields:@{@"source": @"app_delegate", @"phase": self.phaseName}];
     if (![IPDiscordOAuthRequest isCallbackURL:url] || self.attempt.phase != IPAuthorizationPhaseAuthorizing) return NO;
     return [self acceptCallbackURL:url generation:self.attempt.generation fromWebSession:NO];
 }
 - (BOOL)acceptCallbackURL:(NSURL *)url generation:(NSUInteger)generation fromWebSession:(BOOL)fromWebSession {
     if (self.attempt.generation != generation || self.attempt.phase != IPAuthorizationPhaseAuthorizing) return NO;
     NSError *error = nil;
+    if (fromWebSession) [IPDiagnostics recordEvent:@"callback_received" fields:@{@"source": @"web_session", @"phase": self.phaseName}];
     NSString *code = [self.request authorizationCodeFromURL:url error:&error];
     if (!code) {
+        [IPDiagnostics recordEvent:@"callback_rejected" fields:[IPDiagnostics fieldsForError:error]];
         // Unsolicited or forged deep links cannot cancel an active sign-in.
         if (!fromWebSession && (error.code == IPDiscordOAuthRequestErrorStateMismatch ||
                                 error.code == IPDiscordOAuthRequestErrorInvalidCallback)) return NO;
@@ -164,6 +240,7 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
         return YES;
     }
     if (![self.attempt acceptAuthorization:generation]) return NO;
+    [IPDiagnostics recordEvent:@"exchange_started" fields:nil];
     [self notifyState];
     NSURLRequest *request = [self.request tokenRequestForCode:code];
     if (!request) {
@@ -182,6 +259,10 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
             IPDiscordAuthorization *self = weakSelf;
             if (!self || ![self.attempt canSave:generation]) return;
             NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
+            NSMutableDictionary *fields = [[IPDiagnostics fieldsForError:networkError] mutableCopy];
+            fields[@"http_status"] = @(status);
+            fields[@"response_bytes"] = @(data.length);
+            [IPDiagnostics recordEvent:@"exchange_completed" fields:fields];
             if (networkError || status != 200 || data.length > 65536) {
                 [self finish:generation success:NO message:@"Discord could not complete sign-in. Check your connection and try again."];
                 return;
@@ -204,7 +285,11 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
                 return;
             }
             NSError *saveError = nil;
-            if (![IPOAuthStore saveCredentials:credentials replacingSession:nil error:&saveError]) {
+            BOOL saved = [IPOAuthStore saveCredentials:credentials replacingSession:nil error:&saveError];
+            NSMutableDictionary *saveFields = [[IPDiagnostics fieldsForError:saveError] mutableCopy];
+            saveFields[@"success"] = @(saved);
+            [IPDiagnostics recordEvent:@"credentials_saved" fields:saveFields];
+            if (!saved) {
                 [IPOAuthStore clearCredentialsIfSessionMatches:credentials[@"sessionID"]];
                 [self finish:generation success:NO message:@"Could not save sign-in privately. Check that the rootless package is installed, then try again."];
                 return;
@@ -221,6 +306,8 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
     NSUInteger generation = [self.attempt beginRevocation];
     if (!generation) { completion(NO, @"An account request is already in progress."); return; }
     self.completion = completion;
+    self.startedAt = NSProcessInfo.processInfo.systemUptime;
+    [IPDiagnostics recordEvent:@"signout_started" fields:nil];
     NSDictionary *credentials = [IPOAuthStore credentials];
     BOOL cleared = [IPOAuthStore clearCredentialsWithError:NULL];
     [IPOAuthStore notifyChanged];
@@ -247,6 +334,9 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
             IPDiscordAuthorization *self = weakSelf;
             if (!self || self.attempt.generation != generation || self.attempt.phase != IPAuthorizationPhaseRevoking) return;
             NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? [(NSHTTPURLResponse *)response statusCode] : 0;
+            NSMutableDictionary *fields = [[IPDiagnostics fieldsForError:error] mutableCopy];
+            fields[@"http_status"] = @(status);
+            [IPDiagnostics recordEvent:@"revocation_completed" fields:fields];
             BOOL revoked = !error && status >= 200 && status < 300;
             [self finish:generation success:YES message:revoked ? @"Signed out. Activity sharing is off." :
                 @"Signed out on this device. To revoke Discord access too, remove iPresence in Discord’s Authorized Apps."];

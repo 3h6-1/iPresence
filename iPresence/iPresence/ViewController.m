@@ -1,6 +1,7 @@
 #import "ViewController.h"
 #import "IPDiscordAuthorization.h"
 #import "../../shared/IPOAuthStore.h"
+#import "../../shared/IPDiagnostics.h"
 #import <CoreFoundation/CoreFoundation.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -13,10 +14,12 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
 @property(nonatomic, strong) UISwitch *enabledSwitch;
 @property(nonatomic, strong) UISwitch *versionSwitch;
 @property(nonatomic, strong) UIButton *signInButton;
+@property(nonatomic, strong) UIButton *browserSignInButton;
 @property(nonatomic, strong) UIButton *signOutButton;
 @property(nonatomic, strong) UIButton *cancelSignInButton;
 @property(nonatomic, strong) UILabel *accountLabel;
 @property(nonatomic, strong) UILabel *statusLabel;
+@property(nonatomic, strong) UIButton *shareDiagnosticsButton;
 @end
 
 @implementation ViewController
@@ -42,6 +45,7 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    [IPDiagnostics recordEvent:@"app_launch" fields:nil];
     self.title = @"iPresence";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
     NSDictionary *saved = [NSDictionary dictionaryWithContentsOfFile:IPPreferencesPath];
@@ -55,6 +59,9 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     self.signInButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.signInButton.configuration = [UIButtonConfiguration filledButtonConfiguration];
     [self.signInButton addTarget:self action:@selector(signIn) forControlEvents:UIControlEventTouchUpInside];
+    self.browserSignInButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.browserSignInButton setTitle:@"Sign in using browser" forState:UIControlStateNormal];
+    [self.browserSignInButton addTarget:self action:@selector(signInUsingBrowser) forControlEvents:UIControlEventTouchUpInside];
     self.signOutButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.signOutButton setTitle:@"Sign out" forState:UIControlStateNormal];
     [self.signOutButton addTarget:self action:@selector(signOut) forControlEvents:UIControlEventTouchUpInside];
@@ -63,13 +70,19 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     [self.cancelSignInButton addTarget:self action:@selector(cancelSignIn) forControlEvents:UIControlEventTouchUpInside];
     self.statusLabel = [self label:@"Sign in, then enable activity sharing when you’re ready." style:UIFontTextStyleFootnote];
     self.statusLabel.textColor = UIColor.secondaryLabelColor;
+    self.shareDiagnosticsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.shareDiagnosticsButton setTitle:@"Share diagnostics" forState:UIControlStateNormal];
+    [self.shareDiagnosticsButton addTarget:self action:@selector(shareDiagnostics) forControlEvents:UIControlEventTouchUpInside];
+    UILabel *diagnosticsNotice = [self label:@"Includes recent technical events and app/device versions. Authorization credentials are not recorded. Choose where to share the file." style:UIFontTextStyleFootnote];
+    diagnosticsNotice.textColor = UIColor.secondaryLabelColor;
     UILabel *description = [self label:@"Share your music activity with Discord." style:UIFontTextStyleTitle2];
     UILabel *notice = [self label:@"Discord’s minimum presence permission bundle also includes friend and relationship access. iPresence uses it to publish listening activity and does not use friend features. It does not request message, voice, email, or server access. Review Discord’s permissions before approving; you can cancel or revoke access at any time." style:UIFontTextStyleFootnote];
     notice.textColor = UIColor.secondaryLabelColor;
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[
-        description, self.accountLabel, notice, self.signInButton, self.cancelSignInButton, self.signOutButton,
+        description, self.accountLabel, notice, self.signInButton, self.browserSignInButton, self.cancelSignInButton, self.signOutButton,
         [self row:@"Share listening activity" toggle:self.enabledSwitch],
-        [self row:@"Show iOS version" toggle:self.versionSwitch], self.statusLabel
+        [self row:@"Show iOS version" toggle:self.versionSwitch], self.statusLabel,
+        self.shareDiagnosticsButton, diagnosticsNotice
     ]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 24;
@@ -107,6 +120,7 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     self.accountLabel.text = signedIn ? @"Signed in with Discord" : @"Not signed in";
     [self.signInButton setTitle:signedIn ? @"Sign in again with Discord" : @"Sign in with Discord" forState:UIControlStateNormal];
     self.signInButton.enabled = !busy;
+    self.browserSignInButton.enabled = !busy;
     self.signOutButton.hidden = !signedIn;
     self.signOutButton.enabled = !busy;
     self.cancelSignInButton.hidden = !IPDiscordAuthorization.sharedInstance.canCancelSignIn;
@@ -160,7 +174,9 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     self.statusLabel.text = self.enabledSwitch.isOn ? @"Saved. Music activity sharing is on." : @"Saved. Activity sharing is off.";
 }
 
-- (void)signIn {
+- (void)signIn { [self startSignInUsingBrowser:NO]; }
+- (void)signInUsingBrowser { [self startSignInUsingBrowser:YES]; }
+- (void)startSignInUsingBrowser:(BOOL)browser {
     if (IPDiscordAuthorization.sharedInstance.busy) return;
     // Remove any legacy token before starting a new OAuth grant.
     if (![self persistPreferences]) {
@@ -169,10 +185,12 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     }
     self.statusLabel.text = @"Complete sign-in with Discord…";
     __weak __typeof__(self) weakSelf = self;
-    [IPDiscordAuthorization.sharedInstance signInWithCompletion:^(BOOL success, NSString *message) {
+    void (^completion)(BOOL, NSString *) = ^(BOOL success, NSString *message) {
         [weakSelf updateAccount];
         weakSelf.statusLabel.text = success && !weakSelf.enabledSwitch.isOn ? @"Signed in. Turn on “Share listening activity” to begin." : message;
-    }];
+    };
+    if (browser) [IPDiscordAuthorization.sharedInstance signInUsingBrowserWithCompletion:completion];
+    else [IPDiscordAuthorization.sharedInstance signInWithCompletion:completion];
     [self updateAccount];
 }
 
@@ -190,5 +208,20 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
 }
 - (void)cancelSignIn {
     [IPDiscordAuthorization.sharedInstance cancelSignIn];
+}
+- (void)shareDiagnostics {
+    NSError *error = nil;
+    NSURL *snapshot = [IPDiagnostics exportSnapshotWithError:&error];
+    if (!snapshot) {
+        self.statusLabel.text = error.localizedDescription ?: @"Could not prepare private diagnostics. Please try again.";
+        return;
+    }
+    UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[snapshot] applicationActivities:nil];
+    activity.popoverPresentationController.sourceView = self.shareDiagnosticsButton;
+    activity.popoverPresentationController.sourceRect = self.shareDiagnosticsButton.bounds;
+    activity.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *items, NSError *activityError) {
+        [IPDiagnostics removeExportSnapshot:snapshot];
+    };
+    [self presentViewController:activity animated:YES completion:nil];
 }
 @end

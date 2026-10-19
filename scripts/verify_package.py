@@ -10,6 +10,8 @@ import subprocess
 import tarfile
 import tempfile
 
+from app_icons import ICON_SIZES, validate_icons
+
 ROOT = Path(__file__).resolve().parents[1]
 APP = 'var/jb/Applications/iPresence.app'
 DAEMON = 'var/jb/usr/bin/ipresence-daemon'
@@ -82,7 +84,9 @@ def validate_archive(members, control=False):
         expected_mode = 0o755 if member.isdir() or name in BINARIES or (control and name in ('postinst', 'prerm')) else 0o644
         require(member.mode == expected_mode,
                 f'Incorrect mode for {name}: {member.mode:o}, expected {expected_mode:o}')
-    required = {'control', 'postinst', 'prerm'} if control else set(BINARIES) | {f'{APP}/Info.plist', f'{HELPER}.plist', LAUNCHD}
+    required = ({'control', 'postinst', 'prerm'} if control else
+                set(BINARIES) | {f'{APP}/Info.plist', f'{HELPER}.plist', LAUNCHD} |
+                {f'{APP}/{name}' for name in ICON_SIZES})
     require(required <= seen, f'Missing archive members: {sorted(required - seen)}')
 
 
@@ -101,6 +105,10 @@ def validate_layout(root):
     require(any('discord-1561870047562043402' in item.get('CFBundleURLSchemes', []) for item in info.get('CFBundleURLTypes', [])), 'Missing Discord OAuth callback scheme')
     require('discord' in info.get('LSApplicationQueriesSchemes', []), 'Missing Discord query scheme')
     require('arm64' in info.get('UIRequiredDeviceCapabilities', []), 'App must require arm64')
+    try:
+        validate_icons(root / APP, info)
+    except ValueError as error:
+        raise VerificationError(str(error)) from error
     injection = load_plist(root / (HELPER + '.plist')).get('Filter', {})
     require(injection == {'Bundles': ['com.apple.springboard']}, 'Helper must inject only into SpringBoard')
     launchd = load_plist(root / LAUNCHD)
@@ -188,7 +196,7 @@ def verify_package(package):
             require(path.read_text().startswith('#!/var/jb/bin/sh\n'), f'{script}: incorrect rootless interpreter')
             output('/bin/sh', '-n', path)
         verify_binaries(root)
-    print(f'Verified {package.name}: rootless layout, metadata, permissions, plists, and Mach-O slices.')
+    print(f'Verified {package.name}: rootless layout, metadata, permissions, app icons, plists, and Mach-O slices.')
     print('Runtime behavior and jailbreak signature trust still require testing on a device.')
 
 

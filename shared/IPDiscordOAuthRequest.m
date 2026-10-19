@@ -125,6 +125,19 @@ static NSURLRequest *FormRequest(NSString *URL, NSDictionary<NSString *, NSStrin
         components.queryItems = items;
         _authorizationURL = components.URL;
         if (!_authorizationURL) return nil;
+        // Match the official iOS Social SDK's native handoff. Discord's native
+        // route uses code_method; the web OAuth endpoint uses code_challenge_method.
+        NSURLComponents *native = [NSURLComponents componentsWithString:@"discord://view/oauth2/authorize"];
+        NSMutableDictionary *nativeFields = [fields mutableCopy];
+        [nativeFields removeObjectForKey:@"prompt"];
+        [nativeFields removeObjectForKey:@"code_challenge_method"];
+        nativeFields[@"code_method"] = @"S256";
+        NSMutableArray *nativeItems = [NSMutableArray new];
+        for (NSString *key in [nativeFields.allKeys sortedArrayUsingSelector:@selector(compare:)])
+            [nativeItems addObject:[NSURLQueryItem queryItemWithName:key value:nativeFields[key]]];
+        native.queryItems = nativeItems;
+        _nativeAuthorizationURL = native.URL;
+        if (!_nativeAuthorizationURL) return nil;
     }
     return self;
 }

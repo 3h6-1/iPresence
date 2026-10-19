@@ -1,0 +1,7 @@
+iPresence home-screen icon
+Generated with the built-in imagegen tool on 2026-10-19.
+Master: ipresence-icon.png (opaque 1024 x 1024 PNG).
+The generated 1254 x 1254 image was resized with macOS sips for iOS packaging.
+
+Generation prompt:
+Use case: logo-brand. Asset type: final iOS home screen app icon for iPresence, an independent music-listening presence app. Create one original polished icon, square 1024 by 1024, full-bleed opaque background, with no rounded outer corners (iOS applies the mask). Design an instantly legible bold ivory-white musical note whose stem curves into a subtle broadcast/presence arc, plus a small glowing mint-green status dot integrated into the symbol. Rich deep midnight-indigo background with a restrained luminous violet-to-fuchsia glow behind the central mark. Premium tactile glass/enamel depth, very clean silhouette, strong contrast at tiny 60px size, centered with generous safe margins. Contemporary, friendly, crisp. No lettering, no words, no Apple or Discord logos, no existing brand marks, no UI mockup, no phone, no extra border, no watermark. Deliver the icon artwork itself filling the square canvas.

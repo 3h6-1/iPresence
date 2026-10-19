@@ -44,11 +44,11 @@ sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
 architecture="$(uname -m)"
 xcrun --sdk iphonesimulator clang -target "$architecture-apple-ios15.1-simulator" -isysroot "$sdk" \
   -fobjc-arc -fblocks -O1 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations \
-  -DIPOAUTH_STORE_TESTING -DIPDISCORD_OAUTH_REQUEST_TESTING -IiPresence/iPresence -Ishared \
+  -DIPOAUTH_STORE_TESTING -DIPDISCORD_OAUTH_REQUEST_TESTING -DIPDIAGNOSTICS_TESTING -IiPresence/iPresence -Ishared \
   -framework Foundation -framework CoreFoundation -framework UIKit -framework AuthenticationServices -framework Security \
   iPresence/iPresence/main.m iPresence/iPresence/AppDelegate.m iPresence/iPresence/ViewController.m \
   iPresence/iPresence/IPDiscordAuthorization.m shared/IPOAuthStore.m shared/IPAuthorizationAttempt.m \
-  shared/IPDiscordOAuthRequest.m tests/authorization_simulator_tests.m -o "$app/iPresence"
+  shared/IPDiscordOAuthRequest.m shared/IPDiagnostics.m tests/authorization_simulator_tests.m -o "$app/iPresence"
 codesign --force --sign - "$app"
 xcrun simctl install "$simulator_id" "$app"
 python3 tests/run-authorization-simulator-tests.py "$simulator_id" "$output"

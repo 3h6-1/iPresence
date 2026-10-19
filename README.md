@@ -28,14 +28,16 @@ SDK does not establish support for every OS/jailbreak combination, or guarantee
 that background authentication works on a physical device.
 
 **Local validation (2026-10-19):** the package builds and passes archive/Mach-O
-verification with Xcode 27.1 and the iPhoneOS 27.1 SDK. Nine packaging tests,
-68 offline daemon checks, 121 credential-store checks, 65 OAuth request checks,
-37 authorization lifecycle checks, and the media-helper regression suite pass.
-All 12 optional iOS simulator scenarios pass, exercising the production callback
-handlers and UI with a mock browser and HTTP responses. They cover successful sign-in,
-cancellation, timeout, denial, server errors, forged/duplicate callbacks, and
-retry after cancellation. These checks do not perform real Discord authentication,
-external browser handoff, or activity publication.
+verification with Xcode 27.1 and the iPhoneOS 27.1 SDK. Thirteen packaging tests,
+68 offline daemon checks, 121 credential-store checks, 69 OAuth request checks,
+37 authorization lifecycle checks, 69 diagnostics privacy/storage checks, and
+the media-helper regression suite pass. All 18 optional iOS simulator scenarios pass and exercise
+the production callback handlers and UI with mock native/browser handoffs and HTTP
+responses. They cover successful sign-in, cancellation, timeout, denial, server
+errors, forged/duplicate callbacks, native-opening failure, and retry after
+cancellation. These checks do not perform real Discord authentication, external
+app/browser handoff, or activity publication. The home-screen icon was also
+visually verified on the iOS 18.5 simulator using the release icon staging code.
 
 The package does not provide a jailbreak. Check the actual device and OS support
 of [Dopamine](https://github.com/opa334/Dopamine) or
@@ -60,7 +62,7 @@ make test
 make package
 ```
 
-Output: `packages/com.kainograze.ipresence_2.1.1~oauth2_iphoneos-arm64.deb`.
+Output: `packages/com.kainograze.ipresence_2.1.2~oauth3_iphoneos-arm64.deb`.
 The SDK runtime is signed and installed at
 `/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the daemon uses
 that rootless framework search path. The foreground app uses
@@ -109,8 +111,13 @@ before opening sign-in; Discord's own consent screen lists the actual access.
 See [Discord's scope documentation](https://docs.discord.com/developers/discord-social-sdk/core-concepts/oauth2-scopes)
 for the features included in each permission bundle.
 
-Version 2.1.1 owns OAuth through `ASWebAuthenticationSession` and explicitly
-handles UIKit callback URLs. It checks a random state value, uses S256 PKCE,
+Version 2.1.2 first opens the installed Discord app for native authorization,
+matching the native handoff format captured from the official iOS Social SDK
+1.10.19337. This avoids loading the web consent page when Discord is installed.
+If Discord is absent or cannot open, it falls back to an ephemeral
+`ASWebAuthenticationSession`. **Sign in using browser** explicitly chooses that
+fresh browser session. The app handles callback URLs itself, checks a random
+state value, uses S256 PKCE,
 exchanges the code once, and rejects old/forged callbacks. Sign-in has a Cancel
 button and a five-minute deadline; token exchange has a 45-second recovery
 limit. Network requests use default TLS validation, disable caching and cookies,
@@ -121,7 +128,7 @@ and refuse HTTP redirects. No client secret or personal account token is used.
 1. Transfer the local `.deb` to a supported rootless device and open it in Sileo
    or Zebra. Let the package manager resolve dependencies, then respring.
 2. Open **iPresence**, choose **Sign in with Discord**, and review the bundled permissions
-   in Discord's own login/consent screen.
+   in Discord's native authorization screen. A browser is used if Discord cannot open.
 3. Enable **Share listening activity** and play music; changes save automatically. No Mac or desktop
    Discord client is needed. “Signed in” in the app means credentials were saved;
    confirm actual publication by viewing your Discord activity.
@@ -146,7 +153,33 @@ login. Remote authorization revocation is owned by the app, so an old daemon
 request cannot revoke a newer login. Tokens are not printed in logs. This is a private file, not encrypted
 storage: software with mobile/root privileges on a jailbroken device can read it.
 
+## Sign-in diagnostics
+
+If authorization fails or shows a blank page, return to iPresence, cancel any
+pending sign-in, and select **Share diagnostics**. The file contains recent sign-in
+stages, error domains/codes, HTTP statuses, app/OS versions, and the hardware model
+identifier. It excludes authorization URLs, codes, state, PKCE verifiers, tokens,
+usernames, HTTP bodies, and error descriptions. Sharing happens only through the
+destination you choose in the iOS share sheet.
+
+Sanitized events also appear in Console under subsystem `com.kainograze.iPresence`,
+category `diagnostics`. On-device files live in
+`/var/mobile/Library/Preferences/iPresenceDiagnostics/`: `current.jsonl` and
+`previous.jsonl`, each limited to 64 KiB with mode 0600 in a mode-0700 directory.
+The exported snapshot is revalidated and removed after the share sheet finishes.
+
+The browser-only 2.1.1 build showed a blank Discord page on the test device
+(iOS 16.0, Dopamine, Discord installed and signed in). The same authorization URL
+rendered in the desktop browser; the cause inside the phone's web session is not
+confirmed. Native-first authorization avoids that web path. A fresh browser
+session may help with stale website state but cannot repair a Discord/WebKit
+compatibility problem. Real-device confirmation of the native flow is still needed.
+
 ## Activity artwork
+
+The installed app has its own iPresence home-screen icon, derived from
+`assets/ipresence-icon.png` for iPhone and iPad. The generation prompt is stored
+alongside the master image.
 
 The supplied red/pink Apple Music artwork is explicitly sent as the activity's
 large image. The original payload only supplied a tooltip, causing Discord to

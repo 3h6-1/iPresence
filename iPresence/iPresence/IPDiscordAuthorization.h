@@ -12,6 +12,7 @@ FOUNDATION_EXPORT NSNotificationName const IPDiscordAuthorizationStateDidChangeN
 - (void)cancelSignIn;
 - (BOOL)handleOpenURL:(NSURL *)url;
 - (void)signInWithCompletion:(void (^)(BOOL success, NSString *message))completion;
+- (void)signInUsingBrowserWithCompletion:(void (^)(BOOL success, NSString *message))completion;
 - (void)signOutWithCompletion:(void (^)(BOOL success, NSString *message))completion;
 @end
 NS_ASSUME_NONNULL_END

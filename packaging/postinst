@@ -1,0 +1,12 @@
+#!/var/jb/bin/sh
+set -eu
+# An offline package extraction must not touch the build host's launchd.
+[ -z "${DPKG_ROOT:-}" ] || exit 0
+case "${1:-}" in
+    configure)
+        /var/jb/usr/bin/uicache -p /var/jb/Applications/iPresence.app
+        /bin/launchctl bootout system/com.kainograze.iPresence-Daemon 2>/dev/null || true
+        /bin/launchctl bootstrap system /var/jb/Library/LaunchDaemons/com.kainograze.iPresence-Daemon.plist
+        echo "iPresence installed. Respring to load the SpringBoard media helper."
+        ;;
+esac

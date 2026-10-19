@@ -7,24 +7,20 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		9DAC18F82F17913C00B1D089 /* MediaPlayer.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9DADBBDC2F1721B900C85F18 /* MediaPlayer.framework */; };
 		9DADBBC92F1720FC00C85F18 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9DADBBC82F1720FC00C85F18 /* CoreFoundation.framework */; };
 		9DADBBCF2F1720FC00C85F18 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 9DADBBCD2F1720FC00C85F18 /* InfoPlist.strings */; };
 		9DADBBD72F17215500C85F18 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9DADBBD62F17215500C85F18 /* Foundation.framework */; };
-		9DADBBD92F17215C00C85F18 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9DADBBD82F17215C00C85F18 /* UIKit.framework */; };
 		9DADBBDB2F1721A200C85F18 /* iPresence_Springboard_Helper.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DADBBDA2F1721A200C85F18 /* iPresence_Springboard_Helper.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		9DADBBC52F1720FC00C85F18 /* iPresence Springboard Helper.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "iPresence Springboard Helper.bundle"; sourceTree = BUILT_PRODUCTS_DIR; };
+		9DADBBC52F1720FC00C85F18 /* iPresence-Springboard-Helper.dylib */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.dylib"; includeInIndex = 0; path = "iPresence-Springboard-Helper.dylib"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9DADBBC82F1720FC00C85F18 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
 		9DADBBCC2F1720FC00C85F18 /* iPresence Springboard Helper-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "iPresence Springboard Helper-Info.plist"; sourceTree = "<group>"; };
 		9DADBBCE2F1720FC00C85F18 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		9DADBBD02F1720FC00C85F18 /* iPresence Springboard Helper-Prefix.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "iPresence Springboard Helper-Prefix.pch"; sourceTree = "<group>"; };
-		9DADBBD62F17215500C85F18 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS7.1.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		9DADBBD82F17215C00C85F18 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS7.1.sdk/System/Library/Frameworks/UIKit.framework; sourceTree = DEVELOPER_DIR; };
+		9DADBBD62F17215500C85F18 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		9DADBBDA2F1721A200C85F18 /* iPresence_Springboard_Helper.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = iPresence_Springboard_Helper.m; sourceTree = "<group>"; };
-		9DADBBDC2F1721B900C85F18 /* MediaPlayer.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MediaPlayer.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS7.1.sdk/System/Library/Frameworks/MediaPlayer.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -32,9 +28,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9DADBBD92F17215C00C85F18 /* UIKit.framework in Frameworks */,
 				9DADBBD72F17215500C85F18 /* Foundation.framework in Frameworks */,
-				9DAC18F82F17913C00B1D089 /* MediaPlayer.framework in Frameworks */,
 				9DADBBC92F1720FC00C85F18 /* CoreFoundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -54,7 +48,7 @@
 		9DADBBC62F1720FC00C85F18 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				9DADBBC52F1720FC00C85F18 /* iPresence Springboard Helper.bundle */,
+				9DADBBC52F1720FC00C85F18 /* iPresence-Springboard-Helper.dylib */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -62,8 +56,6 @@
 		9DADBBC72F1720FC00C85F18 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				9DADBBDC2F1721B900C85F18 /* MediaPlayer.framework */,
-				9DADBBD82F17215C00C85F18 /* UIKit.framework */,
 				9DADBBD62F17215500C85F18 /* Foundation.framework */,
 				9DADBBC82F1720FC00C85F18 /* CoreFoundation.framework */,
 			);
@@ -98,7 +90,6 @@
 			buildPhases = (
 				9DADBBC12F1720FC00C85F18 /* Sources */,
 				9DADBBC22F1720FC00C85F18 /* Frameworks */,
-				9DADBBC32F1720FC00C85F18 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -106,8 +97,8 @@
 			);
 			name = "iPresence Springboard Helper";
 			productName = "iPresence Springboard Helper";
-			productReference = 9DADBBC52F1720FC00C85F18 /* iPresence Springboard Helper.bundle */;
-			productType = "com.apple.product-type.bundle";
+			productReference = 9DADBBC52F1720FC00C85F18 /* iPresence-Springboard-Helper.dylib */;
+			productType = "com.apple.product-type.library.dynamic";
 		};
 /* End PBXNativeTarget section */
 
@@ -201,9 +192,10 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = macosx;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				ARCHS = "arm64 arm64e";
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = iphoneos;
 			};
 			name = Debug;
 		};
@@ -234,38 +226,37 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				SDKROOT = macosx;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				ARCHS = "arm64 arm64e";
+				SDKROOT = iphoneos;
 			};
 			name = Release;
 		};
 		9DADBBD42F1720FC00C85F18 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				COMBINE_HIDPI_IMAGES = YES;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iPresence Springboard Helper/iPresence Springboard Helper-Prefix.pch";
-				INFOPLIST_FILE = "iPresence Springboard Helper/iPresence Springboard Helper-Info.plist";
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos7.1;
+				INSTALL_PATH = /var/jb/Library/MobileSubstrate/DynamicLibraries;
+				PRODUCT_NAME = "iPresence-Springboard-Helper";
+				EXECUTABLE_PREFIX = "";
+				CODE_SIGNING_ALLOWED = NO;
+				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
-				WRAPPER_EXTENSION = bundle;
 			};
 			name = Debug;
 		};
 		9DADBBD52F1720FC00C85F18 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				COMBINE_HIDPI_IMAGES = YES;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "iPresence Springboard Helper/iPresence Springboard Helper-Prefix.pch";
-				INFOPLIST_FILE = "iPresence Springboard Helper/iPresence Springboard Helper-Info.plist";
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos7.1;
+				INSTALL_PATH = /var/jb/Library/MobileSubstrate/DynamicLibraries;
+				PRODUCT_NAME = "iPresence-Springboard-Helper";
+				EXECUTABLE_PREFIX = "";
+				CODE_SIGNING_ALLOWED = NO;
+				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
-				WRAPPER_EXTENSION = bundle;
 			};
 			name = Release;
 		};

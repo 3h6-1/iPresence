@@ -13,7 +13,6 @@
 
 + (void) Log: (NSString*) str;
 + (NSString*) GetLogs;
-+ (void) initialize;
 + (void) terminate;
 
 @end

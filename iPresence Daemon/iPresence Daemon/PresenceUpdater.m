@@ -1,220 +1,113 @@
-//
-//  PresenceUpdater.m
-//  iPresence-Daemon
-//
-//  Created by kainograze on 1/8/26.
-//  Copyright (c) 2026 kainograze. All rights reserved.
-
-/*
- 
-eu nao sei como fazer isso
- 
- */
-//
-
 #import "PresenceUpdater.h"
+#import "UserPreferences.h"
+#import <math.h>
 
-@interface PresenceUpdater()
-
-+ (PresenceUpdater*) sharedInstance;
-
+@interface PresenceUpdater ()
+@property (nonatomic) NSTimeInterval lastSendTime;
+@property (nonatomic, copy) NSDictionary *lastActivity;
+@property (nonatomic) BOOL sentPresence;
 @end
 
 @implementation PresenceUpdater
-
-#pragma mark - Singleton
-
-+ (PresenceUpdater*) sharedInstance
-{
-    static PresenceUpdater* shared;
-    static dispatch_once_t onceToken;
-    
-    dispatch_once(&onceToken, ^{
-        shared = [PresenceUpdater new];
-        
-        [NSNotificationCenter.defaultCenter addObserver:shared selector:@selector(awake:) name:@"connected" object:nil];
-        [NSNotificationCenter.defaultCenter addObserver:shared selector:@selector(sleep:) name:@"sleep" object:nil];
-        [NSNotificationCenter.defaultCenter addObserver:shared selector:@selector(sleep:) name:@"idle" object:nil];
-        
-        [NSNotificationCenter.defaultCenter addObserver:shared selector:@selector(core:) name:@"playbackStateChanged" object:nil];
-        
++ (instancetype)sharedInstance {
+    static PresenceUpdater *shared;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        shared = [self new];
         shared.state = PresenceUpdaterStateSleeping;
-        shared.musicIsPlaying = NO;
-        shared.pendingUpdate = NO;
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        [center addObserver:shared selector:@selector(awake:) name:@"connected" object:nil];
+        [center addObserver:shared selector:@selector(sleep:) name:@"sleep" object:nil];
+        [center addObserver:shared selector:@selector(sleep:) name:@"idle" object:nil];
+        [center addObserver:shared selector:@selector(sleep:) name:@"disconnected" object:nil];
+        [center addObserver:shared selector:@selector(core:) name:@"playbackStateChanged" object:nil];
     });
     return shared;
 }
 
-#pragma mark - Core
-
-- (void) core: (NSNotification*) n
-{
-    // listens to the media player notification, and, based on them and the current state, sets
-    // flags and vars.
-    
-    self.currentState = n.userInfo;
-    
-    if (!self.currentState) return;
-    if (self.state == PresenceUpdaterStateSleeping) return;
-    
-    [Logger Log: @"playback state changed!"];
-    
-    self.musicIsPlaying = [self.currentState [@"musicIsPlaying"] boolValue];
-    
+- (void)core:(NSNotification *)notification {
+    self.currentState = notification.userInfo;
+    self.musicIsPlaying = [self.currentState[@"musicIsPlaying"] boolValue];
     [self jsonSender];
 }
 
-#pragma mark - JSON sender
-
-- (void) jsonSender
-{
-    if (self.state == PresenceUpdaterStateSleeping) return;
-    
-    if (self.cooldownActive)
-    {
+- (void)jsonSender {
+    if (self.state != PresenceUpdaterStateConnected) return;
+    NSDictionary *activity = self.musicIsPlaying ? [self generateValidActivityJson] : nil;
+    if (self.sentPresence && ((!activity && !self.lastActivity) || [activity isEqualToDictionary:self.lastActivity])) return;
+    NSTimeInterval remaining = self.lastSendTime + 5.5 - NSProcessInfo.processInfo.systemUptime;
+    if (remaining > 0) {
         self.pendingUpdate = YES;
+        if (!self.presenceCooldownTimer) {
+            __weak typeof(self) weakSelf = self;
+            self.presenceCooldownTimer = [NSTimer scheduledTimerWithTimeInterval:remaining repeats:NO block:^(NSTimer *timer) {
+                weakSelf.presenceCooldownTimer = nil;
+                [weakSelf jsonSender];
+            }];
+        }
         return;
     }
-    
-    
     self.pendingUpdate = NO;
-    [self startSenderCooldown];
-    
-    NSDictionary* jsonToSend = self.musicIsPlaying ? [self generateValidActivityJson] : nil;
-//    NSDictionary* jsonToSend = [self generateValidActivityJson];
-    
-    [Logger Log: [jsonToSend description]];
-    
-    [Logger Log:@"sending activity json thru notification"];
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [NSNotificationCenter.defaultCenter postNotificationName:@"sendActivityJson" object:self userInfo:jsonToSend];
-    });
+    self.lastSendTime = NSProcessInfo.processInfo.systemUptime;
+    self.lastActivity = activity;
+    self.sentPresence = YES;
+    [NSNotificationCenter.defaultCenter postNotificationName:@"sendActivityJson" object:self userInfo:activity];
 }
 
-#pragma mark - JSON creator
-
-- (NSDictionary*) generateValidActivityJson
-{
-    
-    NSString *artist = self.currentState[@"metadata"][@"artist"];
-    NSString *song   = self.currentState[@"metadata"][@"title"];
-    NSString *album = self.currentState[@"metadata"][@"album"];
-    
-    NSString *name    =  artist ? [self trimString: artist toMaxLength:128] : @"iPod";
-    NSString *details = song ? [self trimString:song toMaxLength:128] : @"Unknown Song";
-    NSString *state = album ? [self trimString:[NSString stringWithFormat:@"%@ - %@", name, album] toMaxLength:128] :
-            [self trimString:[NSString stringWithFormat:@"%@ - Unknown Album", name] toMaxLength:128];
-    NSString *textAsset = [UserPreferences.sharedInstance valOfDisplayIosVersion] ?
-    [NSString stringWithFormat:@"on iOS %@ iPod App ♫", [UserPreferences.sharedInstance valOfIosVersion]] :
-    @"on iPod App ♫";
-    
-    NSDictionary *json =
-    @{
-      @"application_id":@"1460106321427955903",
-      @"name": name,
-      @"type": @2,
-      @"state": state,
-      @"details": details,
-      @"timestamps":
-          @{
-              @"start": self.currentState[@"metadata"][@"start"],
-              @"end": self.currentState[@"metadata"][@"end"]
-            },
-      @"assets":
-          @{
-              @"large_text": textAsset
-          }
-      };
-    
-    return json;
+- (NSString *)metadataString:(id)value fallback:(NSString *)fallback {
+    return [value isKindOfClass:NSString.class] && [value length] ? value : fallback;
 }
 
-#pragma mark - JSON sender cooldown
-
-- (void) startSenderCooldown
-{
-    self.cooldownActive = YES;
-    
-    if (self.presenceCooldownTimer)
-    {
-        [self.presenceCooldownTimer invalidate];
-        self.presenceCooldownTimer = nil;
+- (NSDictionary *)generateValidActivityJson {
+    NSDictionary *metadata = [self.currentState[@"metadata"] isKindOfClass:NSDictionary.class] ? self.currentState[@"metadata"] : @{};
+    NSString *artist = [self metadataString:metadata[@"artist"] fallback:@"Unknown Artist"];
+    NSString *title = [self metadataString:metadata[@"title"] fallback:@"Unknown Song"];
+    NSString *album = [self metadataString:metadata[@"album"] fallback:@"Unknown Album"];
+    NSString *version = [UserPreferences.sharedInstance valOfIosVersion];
+    NSString *text = [UserPreferences.sharedInstance valOfDisplayIosVersion] && version.length ?
+        [NSString stringWithFormat:@"on iOS %@ · iPresence", version] : @"on iOS · iPresence";
+    NSMutableDictionary *activity = [@{
+        @"application_id": @"1460106321427955903",
+        @"name": [self trimString:artist toMaxLength:128],
+        @"type": @2,
+        @"details": [self trimString:title toMaxLength:128],
+        @"state": [self trimString:[NSString stringWithFormat:@"%@ - %@", artist, album] toMaxLength:128],
+        @"assets": @{@"large_text": [self trimString:text toMaxLength:128]}
+    } mutableCopy];
+    id start = metadata[@"start"], end = metadata[@"end"];
+    if ([start isKindOfClass:NSNumber.class] && [end isKindOfClass:NSNumber.class] &&
+        isfinite([start doubleValue]) && isfinite([end doubleValue]) && [start doubleValue] > 0 &&
+        [end doubleValue] > [start doubleValue]) {
+        activity[@"timestamps"] = @{@"start": start, @"end": end};
     }
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self.presenceCooldownTimer = [NSTimer scheduledTimerWithTimeInterval:5.5
-                                                                      target:self
-                                                                    selector:@selector(senderCooldownEnded)
-                                                                    userInfo:nil
-                                                                     repeats:NO];
-    });
+    return activity;
 }
 
-- (void) senderCooldownEnded
-{
-    self.cooldownActive = NO;
-    
-    if (self.presenceCooldownTimer)
-    {
-        [self.presenceCooldownTimer invalidate];
-        self.presenceCooldownTimer = nil;
-    }
-    
-    if(self.pendingUpdate)[self jsonSender];
+- (NSString *)trimString:(NSString *)string toMaxLength:(NSUInteger)maximum {
+    if (string.length <= maximum) return string;
+    if (maximum < 3) return @"";
+    // Do not cut a surrogate pair or composed emoji in the middle.
+    __block NSUInteger length = 0;
+    [string enumerateSubstringsInRange:NSMakeRange(0, string.length) options:NSStringEnumerationByComposedCharacterSequences
+                           usingBlock:^(NSString *substring, NSRange range, NSRange enclosingRange, BOOL *stop) {
+        if (NSMaxRange(range) > maximum - 3) *stop = YES;
+        else length = NSMaxRange(range);
+    }];
+    return [[string substringToIndex:length] stringByAppendingString:@"..."];
 }
 
-- (NSString *)trimString:(NSString *)string toMaxLength:(NSUInteger)maxLength
-{
-    if (string.length <= maxLength)
-    {
-        return string;
-    }
-    
-    NSUInteger limit = maxLength - 3;
-    
-    NSString *substring = [string substringToIndex:limit];
-    
-    NSRange range = [substring rangeOfCharacterFromSet:
-                     [NSCharacterSet whitespaceAndNewlineCharacterSet]
-                                               options:NSBackwardsSearch];
-    
-    if (range.location != NSNotFound)
-    {
-        substring = [substring substringToIndex:range.location];
-    }
-    
-    return [substring stringByAppendingString:@"..."];
-}
-
-#pragma mark - Sleep, awake, and other state routines
-
-- (void) awake: (NSNotification*) n
-{
+- (void)awake:(NSNotification *)notification {
     if (![UserPreferences.sharedInstance valOfShowAsDiscordStatus]) return;
-    
-    [Logger Log:@"presence updater is awakening"];
-    // is called only when the server communicator is connected to the webscoket (after READY)
-    
-    if (!self.currentState)
-    {
-        self.musicIsPlaying = NO;
-        [Logger Log:@"presence updater is nil, won't awake"];
-        return;
-    }
-    
     self.state = PresenceUpdaterStateConnected;
-    
     self.musicIsPlaying = [self.currentState[@"musicIsPlaying"] boolValue];
-    if (self.musicIsPlaying)
-        [self jsonSender];
-    
+    self.sentPresence = NO;
+    [self jsonSender]; // Also clear a resumed session when playback has stopped.
 }
 
-- (void) sleep: (NSNotification*) n
-{
-    // should stop the listening to the song and do nothing, just await for the next awake signal
-    
+- (void)sleep:(NSNotification *)notification {
     self.state = PresenceUpdaterStateSleeping;
+    [self.presenceCooldownTimer invalidate];
+    self.presenceCooldownTimer = nil;
+    self.pendingUpdate = NO;
 }
-
 @end

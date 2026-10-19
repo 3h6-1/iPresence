@@ -15,11 +15,6 @@
 		9DAB9D612F18732100ED66EE /* PresenceUpdater.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D4B2F18732100ED66EE /* PresenceUpdater.m */; };
 		9DAB9D622F18732100ED66EE /* Tools.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D4D2F18732100ED66EE /* Tools.m */; };
 		9DAB9D632F18732100ED66EE /* UserPreferences.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D4F2F18732100ED66EE /* UserPreferences.m */; };
-		9DAB9D642F18732100ED66EE /* NSString+Base64.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D522F18732100ED66EE /* NSString+Base64.m */; };
-		9DAB9D652F18732100ED66EE /* WSFrame.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D542F18732100ED66EE /* WSFrame.m */; };
-		9DAB9D662F18732100ED66EE /* WSMessage.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D562F18732100ED66EE /* WSMessage.m */; };
-		9DAB9D672F18732100ED66EE /* WSMessageProcessor.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D582F18732100ED66EE /* WSMessageProcessor.m */; };
-		9DAB9D682F18732100ED66EE /* WSWebSocket.m in Sources */ = {isa = PBXBuildFile; fileRef = 9DAB9D5B2F18732100ED66EE /* WSWebSocket.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -183,19 +178,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9DAB9D642F18732100ED66EE /* NSString+Base64.m in Sources */,
 				9DAB9D622F18732100ED66EE /* Tools.m in Sources */,
 				9DAB9D602F18732100ED66EE /* main.m in Sources */,
 				9DAB9D5D2F18732100ED66EE /* Core.m in Sources */,
-				9DAB9D662F18732100ED66EE /* WSMessage.m in Sources */,
-				9DAB9D682F18732100ED66EE /* WSWebSocket.m in Sources */,
 				9DAB9D5C2F18732100ED66EE /* Bootstrap.m in Sources */,
 				9DAB9D5E2F18732100ED66EE /* DCServerCommunicator.m in Sources */,
 				9DAB9D632F18732100ED66EE /* UserPreferences.m in Sources */,
 				9DAB9D612F18732100ED66EE /* PresenceUpdater.m in Sources */,
 				9DAB9D5F2F18732100ED66EE /* Logger.m in Sources */,
-				9DAB9D672F18732100ED66EE /* WSMessageProcessor.m in Sources */,
-				9DAB9D652F18732100ED66EE /* WSFrame.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -234,9 +224,9 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = macosx;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = iphoneos;
 			};
 			name = Debug;
 		};
@@ -267,24 +257,30 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.9;
-				SDKROOT = macosx;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				SDKROOT = iphoneos;
 			};
 			name = Release;
 		};
 		9DAB9D3F2F18729B00ED66EE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos7.1;
+				PRODUCT_NAME = "ipresence-daemon";
+				SDKROOT = iphoneos;
+				ARCHS = "arm64 arm64e";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Debug;
 		};
 		9DAB9D402F18729B00ED66EE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos7.1;
+				PRODUCT_NAME = "ipresence-daemon";
+				SDKROOT = iphoneos;
+				ARCHS = "arm64 arm64e";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				CODE_SIGNING_ALLOWED = NO;
 			};
 			name = Release;
 		};

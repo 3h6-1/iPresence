@@ -1,550 +1,328 @@
-//
-//  DCServerCommunicator.m
-//  iPresence-Daemon
-//
-//  Created by kainograze on 1/9/26.
-//  Copyright (c) 2018 kainograze. All rights reserved.
-//
-
-// Special thanks to Dicord Classic
-
 #import "DCServerCommunicator.h"
-#import "Tools.h"
+#import "UserPreferences.h"
+#import "Logger.h"
+#import <math.h>
+
+static NSString *const DCDefaultGateway = @"wss://gateway.discord.gg/?v=10&encoding=json";
 
 @interface DCServerCommunicator ()
-@property BOOL didRecieveHeartbeatResponse;
-@property BOOL shouldResume;
-@property BOOL heartbeatDefined;
-
-@property BOOL identifyCooldownActive;
-@property BOOL forcingReconnect;
-
-@property int sequenceNumber;
-@property (nonatomic, strong) NSString *sessionId;
-
-@property (nonatomic, strong) NSTimer *cooldownTimer;
+@property (nonatomic, strong) NSURLSession *session;
+@property (nonatomic, copy) NSString *sessionId;
+@property (nonatomic, copy) NSString *resumeGatewayURL;
+@property (nonatomic, strong) NSNumber *sequenceNumber;
 @property (nonatomic, strong) NSTimer *heartbeatTimer;
-@property (nonatomic, strong) NSTimer* heartbeatAckTimer;
-
-@property int reconnectAttempts;
-
-+ (DCServerCommunicator *) sharedInstance;
-
+@property (nonatomic, strong) NSTimer *reconnectTimer;
+@property (nonatomic, strong) NSTimer *identifyTimer;
+@property (nonatomic, strong) NSTimer *handshakeTimer;
+@property (nonatomic) NSTimeInterval heartbeatInterval;
+@property (nonatomic) NSTimeInterval nextIdentifyTime;
+@property (nonatomic) BOOL awaitingHeartbeatAck;
+@property (nonatomic) BOOL authenticationBlocked;
+@property (nonatomic) NSUInteger reconnectAttempts;
 @end
 
 @implementation DCServerCommunicator
 
-+ (DCServerCommunicator *) sharedInstance
-{
-    
-    static DCServerCommunicator *sharedInstance = nil;
-    
-    static dispatch_once_t onceToken;
-    
-    dispatch_once(&onceToken, ^{
-        sharedInstance = [[self alloc] init];
-        
-        // Initialize if a sharedInstance does not yet exist
-        
-        [NSNotificationCenter.defaultCenter addObserver:sharedInstance selector:@selector(awake:) name:@"awake" object:nil];
-        
-        [NSNotificationCenter.defaultCenter addObserver:sharedInstance selector:@selector(sleep:) name:@"sleep" object:nil];
-        
-        [NSNotificationCenter.defaultCenter addObserver:sharedInstance selector:@selector(sendActivityJson:) name:@"sendActivityJson" object:nil];
-        
-        sharedInstance.gatewayURL = @"wss://gateway.discord.gg/?encoding=json&v=9";
-        
-        sharedInstance.state = DCConnectionStateDisconnected;
-        sharedInstance.heartbeatDefined = NO;
-        sharedInstance.Active = NO;
-        sharedInstance.reconnectAttempts = 0;
-        sharedInstance.forcingReconnect = NO;
++ (instancetype)sharedInstance {
+    static DCServerCommunicator *shared;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        shared = [self new];
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        [center addObserver:shared selector:@selector(awake:) name:@"awake" object:nil];
+        [center addObserver:shared selector:@selector(sleep:) name:@"sleep" object:nil];
+        [center addObserver:shared selector:@selector(settingsChanged:) name:@"resetConnection" object:nil];
+        [center addObserver:shared selector:@selector(sendActivityJson:) name:@"sendActivityJson" object:nil];
     });
-    
-    return sharedInstance;
+    return shared;
 }
 
-#pragma mark - Creates websocket
-
-- (void)startCommunicator
-{
-    if (!self.Active) return;
-    if (self.state != DCConnectionStateReconnecting && self.state != DCConnectionStateDisconnected) return;
-    
-    NSLog(@"starting communicator");
-    
-    NSURL *websocketUrl = [NSURL URLWithString:self.gatewayURL];
-    self.websocket = [WSWebSocket.alloc initWithURL:websocketUrl protocols:nil];
-    __weak typeof(self) weakSelf = self;
-    
-    self.state = DCConnectionStateConnecting;
-    
-    [self.websocket setTextCallback:^(NSString *responseString) {
-        //dispatch_async(dispatch_get_main_queue(), ^{
-        [weakSelf processTextCallback:responseString];
-        //});
-    }];
-    
-    [self.websocket setCloseCallback: ^(NSUInteger code, NSString* message) {
-        [weakSelf processCloseCallback:code message:message];
-    }];
-    
-    [self.websocket open];
-    
-}
-
-#pragma mark - Process websocket callbacks
-
-- (void) processCloseCallback:(NSUInteger)code message:(NSString *)message
-{
-    [Logger Log:[NSString stringWithFormat:@"Websocket is closing with code %i and message %@", code, message]];
-    
-    if (self.state == DCConnectionStateDisconnected || self.state == DCConnectionStateReconnecting)
-        return;
-    
-    NSLog(@"websocket closed unexpectedly, reconnecting");
-    [self reconnect];
-}
-
-- (void) processTextCallback: (NSString*)responseString
-{
-    // Parse JSON to a dictionary
-    NSDictionary *parsedJsonResponse = [Tools parseJSON:responseString];
-    
-    // Data values for easy access
-    int op = [[parsedJsonResponse valueForKey:@"op"] integerValue];
-    
-    [Logger Log:[NSString stringWithFormat:@"Got op code %i", op]];
-    
-    switch (op)
-    {
-        case 10:
-        {
-            if (self.shouldResume)
-            {
-                [Logger Log:[NSString stringWithFormat:@"Sending Resume with sequence "
-                             @"number %i, session ID %@",
-                             self.sequenceNumber,
-                             self.sessionId]];
-                [self sendResume];
-                self.shouldResume = NO;
-            }
-            else
-            {
-                [Logger Log:@"Sending Identify"];
-                
-                NSDictionary *d = [parsedJsonResponse valueForKey:@"d"];
-                self.state = DCConnectionStateIdentifying;
-                [self sendIdentify: d];
-            }
-        }
-            break;
-            
-        case 0:
-        {
-            NSString* t = [parsedJsonResponse valueForKey:@"t"];
-            self.sequenceNumber = [[parsedJsonResponse valueForKey:@"s"] integerValue];
-            
-            [Logger Log:[NSString stringWithFormat:@"Got event %@ with sequence number %i",t, self.sequenceNumber]];
-            
-            if ([t isEqualToString: @"READY"])
-            {
-                NSDictionary *d = [parsedJsonResponse valueForKey:@"d"];
-                self.sessionId = [NSString stringWithFormat:@"%@", [d valueForKeyPath:@"session_id"]];
-                self.state = DCConnectionStateConnected;
-                self.reconnectAttempts = 0;
-                self.forcingReconnect = NO;
-                
-                dispatch_async(dispatch_get_main_queue(),^{
-                    [NSNotificationCenter.defaultCenter postNotificationName:@"connected" object:self];
-                });
-                //[self testActivityJson];
-            }
-            else if ([t isEqualToString: @"RESUMED"])
-            {
-                self.state = DCConnectionStateConnected;
-                self.reconnectAttempts = 0;
-                self.forcingReconnect = NO;
-                
-                dispatch_async(dispatch_get_main_queue(),^{
-                    [NSNotificationCenter.defaultCenter postNotificationName:@"connected" object:self];
-                });
-
-            }
-        }
-            break;
-            
-        case 11:
-        {
-            [Logger Log:@"Got Heartbeat response"];
-            self.didRecieveHeartbeatResponse = true;
-            [self.heartbeatAckTimer invalidate];
-            self.heartbeatAckTimer = nil;
-        }
-            break;
-            
-        case 9:
-        {
-            [Logger Log: @"Discord requested a reconnect for invalid session"];
-            [self forceReconnect];
-        }
-            break;
-            
-        default:
-        {
-            // we don't need to handle any other op as this is a minimal client
-        }
-            break;
+- (instancetype)init {
+    if ((self = [super init])) {
+        _gatewayURL = DCDefaultGateway;
+        _state = DCConnectionStateDisconnected;
     }
+    return self;
 }
 
-#pragma mark - Case Senders
-
-- (void)sendResume
-{
-    [self sendJSON:
-     @{
-       @"op" : @6,
-       @"d" :
-           @{
-               @"token" : [UserPreferences.sharedInstance valOfToken],
-               @"session_id" : self.sessionId,
-               @"seq" : @(self.sequenceNumber),
-               }
-       }];
-}
-
-- (void)sendIdentify: (NSDictionary*) d
-{
-    // IDENTIFY
-    [self sendJSON:
-     @{
-       @"op" : @2,
-       @"d" :
-           @{
-               @"token" : [UserPreferences.sharedInstance valOfToken],
-               @"properties" :
-                   @{
-                       @"os" : @"iOS",
-                       @"$browser" : @"Discord iOS",
-                       },
-               @"large_threshold" : @"50",
-               }
-       }];
-    
-    // Disable ability to identify until reenabled 5 seconds later.
-    // API only allows once identify every 5 seconds
-    self.identifyCooldownActive = YES;
-    
-    // initial value should be true
-    self.didRecieveHeartbeatResponse = YES;
-    
-    int heartbeatInterval = [[d valueForKey:@"heartbeat_interval"] intValue];
-    
-    [Logger Log:[NSString stringWithFormat:@"Heartbeat is %d seconds",
-                 heartbeatInterval / 1000]];
-    
-    if (!self.heartbeatDefined)
-    {
-        [Logger Log:@"Setting Heartbeat timer"];
-        
-        // the intention is to consume the least resources. making it run on the main
-        // thread is ideal instead of making it run on its own loop.
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self.heartbeatTimer =
-            [NSTimer scheduledTimerWithTimeInterval:heartbeatInterval / 1000
-                                             target:self
-                                           selector:@selector(sendHeartbeat:)
-                                           userInfo:nil
-                                            repeats:YES];
-            self.heartbeatDefined = YES;
-        });
-    }
-    
-    if (!self.cooldownTimer)
-    {
-        dispatch_async(dispatch_get_main_queue(),^{
-            self.cooldownTimer =
-            [NSTimer scheduledTimerWithTimeInterval:5
-                                             target:self
-                                           selector:@selector(refreshIdentifyCooldown:)
-                                           userInfo:nil
-                                            repeats:NO];
-            self.identifyCooldownActive = YES;
-        });
-    }
-}
-
-#pragma mark - Heartbeat sender
-
-- (void) sendHeartbeat: (NSTimer*) t
-{
-    [Logger Log:@"send heartbeat called"];
-    
-    if (!self.websocket)
-    {
-        [Logger Log:@"Wont send heartbeat because websocket isnt valid"];
-        return;
-    }
-    
-    if (self.state == DCConnectionStateDisconnected ||
-        self.state == DCConnectionStateReconnecting)
-        return;
-    
-    self.didRecieveHeartbeatResponse = NO;
-    
-    if (!self.heartbeatAckTimer)
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self. heartbeatAckTimer = [NSTimer scheduledTimerWithTimeInterval:8 target:self selector:@selector(checkForRecievedHeartbeat) userInfo:nil repeats:NO];
-        });
-    
-    [self sendJSON:@{ @"op": @1, @"d": @(self.sequenceNumber)}];
-    [Logger Log:@"Sent heartbeat"];
-    
-}
-
-- (void) checkForRecievedHeartbeat
-{
-    [self.heartbeatAckTimer invalidate];
-    self.heartbeatAckTimer = nil;
-    
-    if (self.didRecieveHeartbeatResponse) return;
-    
-    [self reconnect];
-}
-
-- (void) resetHeartbeat
-{
-    [self.heartbeatTimer invalidate];
-    self.heartbeatTimer = nil;
-    self.heartbeatDefined = NO;
-    [self.heartbeatAckTimer invalidate];
-    self.heartbeatAckTimer = nil;
-}
-
-#pragma mark - Identity timer
-
-- (void)refreshIdentifyCooldown:(NSTimer *)timer
-{
-    self.identifyCooldownActive = NO;
-    
-    [self.cooldownTimer invalidate];
-    self.cooldownTimer = nil;
-    
-    [Logger Log:@"Authentication cooldown ended"];
-}
-
-#pragma mark - Connection handlers
-
-/*
- The prime difference between forceReconnect and reconnect is that forceReconnect forces a new
- session, while reconnect will try to resume.
- Therefore, reconnect should always be the method called when wanting to reopen the websocket,
- because if the session is invalid, discord will throw op case 9, which will trigger a
- forceReconnect to generate a new, valid session.
- This prime difference should always be taken into account in states: reconnect will set the state
- to resumming, while forceReconnect will set it to reconnecting.
- */
-
-- (void) reconnect
-{
-    [Logger Log:[NSString stringWithFormat:@"Identify cooldown %s", self.identifyCooldownActive ? "true" : "false"]];
-    
-    self.state = DCConnectionStateReconnecting;
-    
-    dispatch_async(dispatch_get_main_queue(),^{
-        [NSNotificationCenter.defaultCenter postNotificationName:@"idle" object:self];
-    });
-    
-    [self disconnect];
-    
-    NSTimeInterval delay = [self nextReconnectDelay];
-    self.reconnectAttempts++;
-    NSLog(@"attemping to reconnect, attempt number: %i", self.reconnectAttempts);
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self reconnectRoutine];
-    });
-}
-
-- (void) forceReconnect
-{
-    NSLog(@"force reconnect");
-    self.forcingReconnect = YES;
-    self.shouldResume = NO;
-    
-    self.sequenceNumber = 0;
+- (void)clearSession {
     self.sessionId = nil;
-    
+    self.sequenceNumber = nil;
+    self.resumeGatewayURL = nil;
+}
+
+- (void)startCommunicator {
+    if (!self.Active || self.authenticationBlocked || self.websocket) return;
+    if (![UserPreferences.sharedInstance valOfToken].length) return;
+    if (!self.session) {
+        NSURLSessionConfiguration *configuration = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+        configuration.timeoutIntervalForRequest = 30;
+        configuration.URLCache = nil;
+        // Foundation performs normal system TLS trust evaluation. No custom trust overrides.
+        self.session = [NSURLSession sessionWithConfiguration:configuration delegate:self delegateQueue:NSOperationQueue.mainQueue];
+    }
+    NSString *address = (self.sessionId.length && self.sequenceNumber && self.resumeGatewayURL.length)
+        ? self.resumeGatewayURL : self.gatewayURL;
+    NSURL *url = [NSURL URLWithString:address];
+    if (![url.scheme.lowercaseString isEqualToString:@"wss"]) return;
+    self.state = DCConnectionStateConnecting;
+    self.websocket = [self.session webSocketTaskWithURL:url];
+    self.websocket.maximumMessageSize = 16 * 1024 * 1024;
+    [self.websocket resume];
+    [self receiveFromTask:self.websocket];
+    __weak typeof(self) weakSelf = self;
+    self.handshakeTimer = [NSTimer scheduledTimerWithTimeInterval:45 repeats:NO block:^(NSTimer *timer) {
+        [weakSelf reconnect];
+    }];
+}
+
+- (void)receiveFromTask:(NSURLSessionWebSocketTask *)task {
+    __weak typeof(self) weakSelf = self;
+    [task receiveMessageWithCompletionHandler:^(NSURLSessionWebSocketMessage *message, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            typeof(self) self = weakSelf;
+            if (!self || self.websocket != task) return;
+            if (error) {
+                [self handleTransportFailure:task];
+                return;
+            }
+            NSString *text = message.type == NSURLSessionWebSocketMessageTypeString ? message.string :
+                [[NSString alloc] initWithData:message.data encoding:NSUTF8StringEncoding];
+            if (text) [self processTextCallback:text];
+            if (self.websocket == task) [self receiveFromTask:task];
+        });
+    }];
+}
+
+- (void)handleTransportFailure:(NSURLSessionWebSocketTask *)task {
+    // Allow didCloseWithCode to deliver Discord's application close code first.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self.websocket == task) [self processCloseCallback:task.closeCode message:nil];
+    });
+}
+
+- (void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)task
+ didCloseWithCode:(NSURLSessionWebSocketCloseCode)closeCode reason:(NSData *)reason {
+    if (self.websocket == task) [self processCloseCallback:closeCode message:nil];
+}
+
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    if (self.websocket == task) [self handleTransportFailure:(NSURLSessionWebSocketTask *)task];
+}
+
+- (void)processCloseCallback:(NSUInteger)code message:(NSString *)message {
+    if (!self.Active || self.state == DCConnectionStateReconnecting) return;
+    [Logger Log:[NSString stringWithFormat:@"Gateway closed (%lu)", (unsigned long)code]];
+    // Authentication/protocol errors require a settings change, not an endless retry loop.
+    if (code == 4004 || code == 4010 || code == 4011 || code == 4012 || code == 4013 || code == 4014) {
+        self.authenticationBlocked = YES;
+        [self clearSession];
+        [self sleep:nil];
+        [Logger Log:@"Gateway authentication or configuration rejected; update settings before retrying."];
+        return;
+    }
+    if (code == 4007 || code == 4009 || code == 1000 || code == 1001) [self clearSession];
     [self reconnect];
 }
 
-- (void) reconnectRoutine
-{
-    NSLog(@"reconnecting");
-    if (!self.forcingReconnect) self.shouldResume = YES;
-    
-    if(!self.identifyCooldownActive)
-    {
-        [Logger Log:@"No cooldown in effect. Authenticating..."];
-        [self startCommunicator];
+- (void)processTextCallback:(NSString *)response {
+    NSData *data = [response dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) return;
+    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    if (![object isKindOfClass:NSDictionary.class] || ![object[@"op"] isKindOfClass:NSNumber.class]) return;
+    NSDictionary *payload = object;
+    id value = payload[@"d"];
+    NSDictionary *details = [value isKindOfClass:NSDictionary.class] ? value : @{};
+    switch ([payload[@"op"] integerValue]) {
+        case 10: {
+            if (self.state != DCConnectionStateConnecting) return;
+            id interval = details[@"heartbeat_interval"];
+            if (![interval isKindOfClass:NSNumber.class] || !isfinite([interval doubleValue]) || [interval doubleValue] < 1000) {
+                [self reconnect];
+                return;
+            }
+            self.heartbeatInterval = [interval doubleValue] / 1000.0;
+            self.awaitingHeartbeatAck = NO;
+            [self scheduleHeartbeat:self.heartbeatInterval * ((double)arc4random_uniform(1000000) / 1000000.0)];
+            self.state = DCConnectionStateIdentifying;
+            if (self.sessionId.length && self.sequenceNumber) [self sendResume];
+            else [self sendIdentify:details];
+            break;
+        }
+        case 0: {
+            if ([payload[@"s"] isKindOfClass:NSNumber.class]) self.sequenceNumber = payload[@"s"];
+            NSString *event = [payload[@"t"] isKindOfClass:NSString.class] ? payload[@"t"] : nil;
+            if ([event isEqualToString:@"READY"]) {
+                if (![details[@"session_id"] isKindOfClass:NSString.class] || ![details[@"session_id"] length]) {
+                    [self forceReconnect];
+                    return;
+                }
+                self.sessionId = details[@"session_id"];
+                NSString *resume = [details[@"resume_gateway_url"] isKindOfClass:NSString.class] ? details[@"resume_gateway_url"] : nil;
+                NSURLComponents *components = resume ? [NSURLComponents componentsWithString:resume] : nil;
+                NSString *host = components.host.lowercaseString;
+                // Do not send credentials to an arbitrary URL supplied in a malformed event.
+                if ([components.scheme.lowercaseString isEqualToString:@"wss"] &&
+                    ([host isEqualToString:@"discord.gg"] || [host hasSuffix:@".discord.gg"])) {
+                    components.query = @"v=10&encoding=json";
+                    components.user = nil;
+                    components.password = nil;
+                    self.resumeGatewayURL = components.URL.absoluteString;
+                } else self.resumeGatewayURL = nil;
+            }
+            if ([event isEqualToString:@"READY"] || [event isEqualToString:@"RESUMED"]) {
+                self.state = DCConnectionStateConnected;
+                self.reconnectAttempts = 0;
+                [self.handshakeTimer invalidate];
+                self.handshakeTimer = nil;
+                [NSNotificationCenter.defaultCenter postNotificationName:@"connected" object:self];
+            }
+            break;
+        }
+        case 1: // Server-requested heartbeats do not reset the regular schedule.
+            [self transmitHeartbeat];
+            break;
+        case 7:
+            [self reconnect];
+            break;
+        case 9:
+            if (![value isKindOfClass:NSNumber.class] || ![value boolValue]) [self clearSession];
+            [self reconnectWithMinimumDelay:1.0 + arc4random_uniform(4000) / 1000.0];
+            break;
+        case 11:
+            self.awaitingHeartbeatAck = NO;
+            break;
+        default:
+            break;
     }
-    else
-    {
-        double timeRemaining = self.cooldownTimer.fireDate.timeIntervalSinceNow;
-        
-        [Logger Log:[NSString stringWithFormat:@"Cooldown in effect. Time left %f", timeRemaining]];
-        
-        [self performSelector:@selector(startCommunicator) withObject:nil afterDelay:timeRemaining + 1];
-    }
 }
 
-- (void) disconnect
-{
-    // notice how this method doesn't reset the session. forceReconnect should be the only place
-    // where that happens.
-    
-    [Logger Log:@"Disconnecting websocket"];
-    
-    // cooldownTimer should not be invalidated here
-    [self resetHeartbeat];
-    
-    [NSObject cancelPreviousPerformRequestsWithTarget:self];
-    
-    // reset state
-    self.didRecieveHeartbeatResponse = NO;
-    
-    // close websocket
-    if (self.websocket)
-    {
-        [self.websocket close];
-        self.websocket = nil;
-    }
+- (void)sendResume {
+    NSString *token = [UserPreferences.sharedInstance valOfToken];
+    if (!token.length || !self.sessionId.length || !self.sequenceNumber) return;
+    [self sendJSON:@{@"op": @6, @"d": @{@"token": token, @"session_id": self.sessionId, @"seq": self.sequenceNumber}}];
 }
 
-- (NSTimeInterval)nextReconnectDelay
-{
-    int attempt = self.reconnectAttempts;
-    NSTimeInterval delay = pow(2, attempt) * 2;
-    return MIN(delay, 60);
-}
-
-#pragma mark - Senders
-
-- (void) testActivityJson
-{
-    NSTimeInterval timeSince = [NSDate.date timeIntervalSince1970];
-    long long totalPlayback = (timeSince * 1000) + (120 * 1000);
-    long long current = timeSince * 1000;
-
-    
-    [Logger Log:@"sending test activity json"];
-    NSDictionary* jsonToSend =
-    @{
-      @"op": @3,
-      @"d":
-          @{
-              @"since": [NSNull null],
-              @"activities":
-              @[@{
-                      @"application_id":@"1460106321427955903",
-                      @"name": @"test hihi",
-                      @"type": @2,
-                      @"state": @"artist",
-                      @"details": @"song",
-                      @"assets":
-                      @{
-                          @"large_image": @"https://mondiniplantas.cdn.magazord.com.br/img/2025/09/produto/7521/banana-caturra-nanica.jpg?ims=800x800",
-                          @"large_text": @"bleh"
-                      },
-                      @"timestamps":
-                      @{
-                              @"start": [NSNumber numberWithLongLong:current],
-                              @"end": [NSNumber numberWithLongLong:totalPlayback]
-                        }
-              }],
-              @"status": [NSNull null],
-              @"afk": @NO
-              }
-      };
-    
-    [self sendJSON: jsonToSend];
-}
-
-- (void)sendActivityJson: (NSNotification*) n
-{
-    [Logger Log: @"received activity json thru notification, trying to send. state: "];
-    
-    NSDictionary* jsonToSend =
-    @{
-      @"op": @3,
-      @"d":
-          @{
-              @"since": [NSNull null],
-              @"activities": n.userInfo ? @[n.userInfo] : [NSNull null],
-              @"status": @"idle",
-              @"afk": @NO
-              }
-      };
-    
-    if (self.state == DCConnectionStateConnected) [self sendJSON: jsonToSend];
-    
-}
-
-- (void)sendJSON:(NSDictionary*)dictionary
-{
-    
-    if (!self.websocket) return;
-    
-    if (self.state == DCConnectionStateDisconnected ||
-        self.state == DCConnectionStateReconnecting)
+- (void)sendIdentify:(NSDictionary *)hello {
+    NSTimeInterval delay = self.nextIdentifyTime - NSProcessInfo.processInfo.systemUptime;
+    if (delay > 0) {
+        [self.identifyTimer invalidate];
+        __weak typeof(self) weakSelf = self;
+        self.identifyTimer = [NSTimer scheduledTimerWithTimeInterval:delay repeats:NO block:^(NSTimer *timer) {
+            [weakSelf sendIdentify:nil];
+        }];
         return;
-    
-    [Logger Log:@"trying to send json"];
-    
-    NSError *writeError = nil;
-    
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dictionary options:0 error:&writeError];
-    
-    NSString *jsonString = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-    [Logger Log: jsonString];
-    [self.websocket sendText:jsonString];
-    
-}
-
-#pragma mark - Sleep and awake routines
-
-- (void) awake:(NSNotification *)n
-{
-    NSLog(@"DC attempting to awake");
-    if (![UserPreferences.sharedInstance valOfShowAsDiscordStatus]) return;
-    if (![UserPreferences.sharedInstance valOfToken]) return;
-    
-    NSLog(@"awakening");
-    
-    self.Active = YES;
-    if (self.sessionId) [self reconnect];
-    else
-    {
-        NSLog(@"no session id found, starting new session");
-        [self startCommunicator];
     }
-    dispatch_async(dispatch_get_main_queue(),^{
-        [NSNotificationCenter.defaultCenter postNotificationName:@"idle" object:self];
-    });
+    NSString *token = [UserPreferences.sharedInstance valOfToken];
+    if (!token.length || !self.Active) return;
+    self.nextIdentifyTime = NSProcessInfo.processInfo.systemUptime + 5.5;
+    [self sendJSON:@{@"op": @2, @"d": @{
+        @"token": token, @"intents": @0,
+        @"properties": @{@"os": @"iOS", @"browser": @"iPresence", @"device": @"iPresence"},
+        @"large_threshold": @50, @"compress": @NO
+    }}];
 }
 
-- (void) sleep:(NSNotification *)n
-{
-    NSLog(@"DC sleep");
-    // the only place where the state should be set to disconnected. the websocket should always
-    // try to reconnect in any other case.
-    dispatch_async(dispatch_get_main_queue(),^{
-        [NSNotificationCenter.defaultCenter postNotificationName:@"disconnected" object:self];
-    });
+- (void)scheduleHeartbeat:(NSTimeInterval)delay {
+    [self.heartbeatTimer invalidate];
+    __weak typeof(self) weakSelf = self;
+    self.heartbeatTimer = [NSTimer scheduledTimerWithTimeInterval:MAX(0.001, delay) repeats:NO block:^(NSTimer *timer) {
+        [weakSelf sendHeartbeat:timer];
+    }];
+}
+
+- (void)transmitHeartbeat {
+    self.awaitingHeartbeatAck = YES;
+    [self sendJSON:@{@"op": @1, @"d": self.sequenceNumber ?: NSNull.null}];
+}
+
+- (void)sendHeartbeat:(NSTimer *)timer {
+    if (!self.Active || !self.websocket) return;
+    if (self.awaitingHeartbeatAck) {
+        [self reconnect];
+        return;
+    }
+    [self transmitHeartbeat];
+    [self scheduleHeartbeat:self.heartbeatInterval];
+}
+
+- (void)cancelConnectionWithCode:(NSURLSessionWebSocketCloseCode)code {
+    [self.heartbeatTimer invalidate]; self.heartbeatTimer = nil;
+    [self.identifyTimer invalidate]; self.identifyTimer = nil;
+    [self.handshakeTimer invalidate]; self.handshakeTimer = nil;
+    self.awaitingHeartbeatAck = NO;
+    NSURLSessionWebSocketTask *task = self.websocket;
+    self.websocket = nil; // Ignore asynchronous callbacks from the old task.
+    [task cancelWithCloseCode:code reason:nil];
+}
+
+- (void)reconnectWithMinimumDelay:(NSTimeInterval)minimum {
+    if (!self.Active || self.reconnectTimer) return;
+    self.state = DCConnectionStateReconnecting;
+    [NSNotificationCenter.defaultCenter postNotificationName:@"idle" object:self];
+    // 1000/1001 invalidate the Discord session; 4000 permits resume.
+    [self cancelConnectionWithCode:(NSURLSessionWebSocketCloseCode)4000];
+    NSTimeInterval delay = MIN(60.0, 2.0 * pow(2.0, MIN(self.reconnectAttempts, 5UL)));
+    self.reconnectAttempts++;
+    delay = MAX(minimum, delay + arc4random_uniform(1000) / 1000.0);
+    __weak typeof(self) weakSelf = self;
+    self.reconnectTimer = [NSTimer scheduledTimerWithTimeInterval:delay repeats:NO block:^(NSTimer *timer) {
+        weakSelf.reconnectTimer = nil;
+        [weakSelf startCommunicator];
+    }];
+}
+
+- (void)reconnect { [self reconnectWithMinimumDelay:0]; }
+- (void)forceReconnect { [self clearSession]; [self reconnect]; }
+
+- (void)disconnect {
+    [self.reconnectTimer invalidate]; self.reconnectTimer = nil;
+    [self cancelConnectionWithCode:NSURLSessionWebSocketCloseCodeNormalClosure];
+    [self clearSession];
+}
+
+- (void)sendActivityJson:(NSNotification *)notification {
+    if (self.state != DCConnectionStateConnected) return;
+    NSArray *activities = notification.userInfo.count ? @[notification.userInfo] : @[];
+    [self sendJSON:@{@"op": @3, @"d": @{
+        @"since": NSNull.null, @"activities": activities, @"status": @"idle", @"afk": @NO
+    }}];
+}
+
+- (void)sendJSON:(NSDictionary *)dictionary {
+    NSURLSessionWebSocketTask *task = self.websocket;
+    if (!task || !self.Active || self.state == DCConnectionStateReconnecting) return;
+    NSData *data = [NSJSONSerialization dataWithJSONObject:dictionary options:0 error:NULL];
+    if (!data || data.length > 4096) return;
+    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    // Never log payloads: Identify and Resume contain the account credential.
+    __weak typeof(self) weakSelf = self;
+    [task sendMessage:[[NSURLSessionWebSocketMessage alloc] initWithString:json] completionHandler:^(NSError *error) {
+        if (!error) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf.websocket == task) [weakSelf handleTransportFailure:task];
+        });
+    }];
+}
+
+- (void)awake:(NSNotification *)notification {
+    if (self.Active || self.authenticationBlocked || ![UserPreferences.sharedInstance valOfShowAsDiscordStatus] ||
+        ![UserPreferences.sharedInstance valOfToken].length) return;
+    self.Active = YES;
+    [NSNotificationCenter.defaultCenter postNotificationName:@"idle" object:self];
+    [self startCommunicator];
+}
+
+- (void)sleep:(NSNotification *)notification {
     self.Active = NO;
     self.state = DCConnectionStateDisconnected;
     [self disconnect];
+    [NSNotificationCenter.defaultCenter postNotificationName:@"disconnected" object:self];
 }
 
+- (void)settingsChanged:(NSNotification *)notification {
+    self.authenticationBlocked = NO;
+    self.reconnectAttempts = 0;
+    [self sleep:nil];
+}
 @end

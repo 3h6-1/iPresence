@@ -2,17 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>Disabled</key>
-	<false/>
-    <key>KeepAlive</key>
-    <true/>
 	<key>Label</key>
 	<string>com.kainograze.iPresence-Daemon</string>
-	<key>OnDemand</key>
-	<false/>
-	<key>Program</key>
-	<string>/usr/bin/ipresence-daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/var/jb/usr/bin/ipresence-daemon</string>
+	</array>
+	<key>UserName</key>
+	<string>mobile</string>
+	<key>GroupName</key>
+	<string>mobile</string>
 	<key>RunAtLoad</key>
 	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
 </dict>
 </plist>

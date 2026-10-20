@@ -201,7 +201,7 @@ NSNotificationName const IPDiscordAuthorizationStateDidChangeNotification = @"IP
             IPDiscordAuthorization *self = weakSelf;
             if (!self || self.attempt.generation != generation || self.attempt.phase != IPAuthorizationPhaseAuthorizing) return;
             NSMutableDictionary *fields = [[IPDiagnostics fieldsForError:error] mutableCopy];
-            fields[@"callback_present"] = @(callbackURL != nil);
+            fields[@"callback_present"] = callbackURL ? @YES : @NO;
             [IPDiagnostics recordEvent:@"auth_browser_completion" fields:fields];
             if (error || !callbackURL) {
                 BOOL cancelled = [error.domain isEqualToString:ASWebAuthenticationSessionErrorDomain] && error.code == ASWebAuthenticationSessionErrorCodeCanceledLogin;

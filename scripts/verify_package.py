@@ -57,7 +57,7 @@ def validate_control(fields):
     dependencies = fields.get('Depends', '')
     require(re.search(r'firmware\s*\(>=\s*15\.1\)', dependencies), 'Missing iOS 15.1 minimum dependency')
     require(re.search(r'firmware\s*\(<<\s*26\.0\.2\)', dependencies), 'Missing iOS 26.0.1 upper boundary')
-    for dependency in ('mobilesubstrate', 'uikittools'):
+    for dependency in ('mobilesubstrate', 'uikittools', 'launchctl'):
         require(re.search(r'(?:^|,)\s*' + dependency + r'(?:\s|,|$)', dependencies),
                 f'Missing runtime dependency: {dependency}')
 

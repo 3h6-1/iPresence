@@ -34,7 +34,7 @@ SDK does not establish support for every OS/jailbreak combination, or guarantee
 that background authentication works on a physical device.
 
 **Local validation (2026-10-19):** the package builds and passes archive/Mach-O
-verification with Xcode 27.1 and the iPhoneOS 27.1 SDK. Thirteen packaging tests,
+verification with Xcode 27.1 and the iPhoneOS 27.1 SDK. Twenty packaging tests,
 68 offline daemon checks, 121 credential-store checks, 69 OAuth request checks,
 37 authorization lifecycle checks, 69 diagnostics privacy/storage checks, and
 the media-helper regression suite pass. All 18 optional iOS simulator scenarios pass and exercise
@@ -48,6 +48,8 @@ The diagnostics viewer passes 25 additional simulator checks covering report
 presentation, private copy options, repeated taps, document-picker construction,
 and snapshot lifetime. Copy writes and Files presentation are intercepted in the
 fixture; actual Files export still needs device validation.
+Installer tests use isolated stub commands to cover rootless tool selection,
+missing tools, failed daemon startup, and removal without touching host launchd.
 
 The package does not provide a jailbreak. Check the actual device and OS support
 of [Dopamine](https://github.com/opa334/Dopamine) or
@@ -72,7 +74,7 @@ make test
 make package
 ```
 
-Output: `packages/com.kainograze.ipresence_2.1.3~oauth4_iphoneos-arm64.deb`.
+Output: `packages/com.kainograze.ipresence_2.1.4~oauth5_iphoneos-arm64.deb`.
 The SDK runtime is signed and installed at
 `/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the daemon uses
 that rootless framework search path. The foreground app uses
@@ -150,6 +152,15 @@ and refuse HTTP redirects. No client secret or personal account token is used.
    credentials and attempt to revoke authorization. You can also remove iPresence
    from Discord's **Authorized Apps** settings, especially after an offline sign-out.
 
+Version 2.1.4 fixes installation on rootless devices where `/bin/launchctl` does
+not exist. The package declares its `launchctl` dependency and resolves the
+executable under `/var/jb` before considering the system path. A failed daemon
+bootstrap remains an installation error; it is never reported as success.
+If Sileo reports `postinst: /bin/launchctl: not found` from an earlier package,
+install the new `.deb` through Sileo to replace that script, then respring after
+configuration succeeds. Re-running configuration of the old package alone still
+uses the old script.
+
 Opening the new app removes the legacy token setting. The new daemon never reads
 or uses that personal token, even if an old preference remains before first launch.
 There is no fallback to the old personal-token Gateway transport.
@@ -182,7 +193,8 @@ Version 2.1.3 replaces the iOS share sheet: a supplied iOS 16.0 crash report sho
 a null-pointer crash in CoreImage/MobileIcons while the sheet fetched an AirDrop
 activity icon, with SnowBoard in that call stack. The report viewer avoids that
 activity/icon-discovery path entirely. The log does not establish the sole cause
-of the crash or explain the blank browser page.
+of the crash or explain the blank browser page. The user confirmed the replacement
+diagnostics viewer works on the affected device.
 
 Sanitized events also appear in Console under subsystem `com.kainograze.iPresence`,
 category `diagnostics`. On-device files live in
@@ -191,13 +203,18 @@ category `diagnostics`. On-device files live in
 The exported snapshot is revalidated and kept while the viewer is open, then
 removed when the viewer closes. A copy explicitly saved to Files remains there.
 
-The browser-only 2.1.1 build showed a blank Discord page on the test device
-(iOS 16.0, Dopamine, Discord installed and signed in). The same authorization URL
-rendered in the desktop browser; the cause inside the phone's web session is not
-confirmed. Native-first authorization avoids that web path. A fresh browser
-session may help with stale website state but cannot repair a Discord/WebKit
-compatibility problem. The user has confirmed native sign-in works; browser-only
-sign-in remains under investigation pending a report from the affected device.
+The iOS 16.0/Dopamine test device shows a blank Discord page in the app's browser
+session and at `https://discord.com/login` in both ordinary and Private Safari
+tabs. This reproduces independently of iPresence and its OAuth URL. The diagnostic
+report shows the authentication session starts and later reports cancellation,
+with no callback or token exchange; it does not expose the page's rendering error.
+Native sign-in is confirmed working and remains the recommended route.
+
+If Safari also shows a blank page, check that JavaScript is enabled and try a
+different network, following [Apple's Safari troubleshooting](https://support.apple.com/en-us/102456).
+If it persists, Safari Web Inspector can identify the failing script or request
+on the public login page. The underlying website/WebKit/filtering cause remains
+unconfirmed; changing OAuth permissions or weakening PKCE would not diagnose it.
 
 ## Activity artwork
 

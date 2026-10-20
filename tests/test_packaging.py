@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import plistlib
+import re
 import struct
 import subprocess
 import sys
@@ -86,7 +87,8 @@ class PackageRegressionTests(unittest.TestCase):
         verify.validate_control(fields)
         self.assertIn('\n', fields['Description'])
         for field, value in (('Architecture', 'iphoneos-arm'), ('Architecture', 'iphoneos-arm64e'),
-                             ('Depends', 'firmware (>= 15.1), mobilesubstrate, uikittools')):
+                             ('Depends', 'firmware (>= 15.1), mobilesubstrate, uikittools'),
+                             ('Depends', 'firmware (>= 15.1), firmware (<< 26.0.2), mobilesubstrate, uikittools')):
             modified = dict(fields, **{field: value})
             with self.subTest(field=field, value=value), self.assertRaises(verify.VerificationError):
                 verify.validate_control(modified)
@@ -191,6 +193,125 @@ class PackageRegressionTests(unittest.TestCase):
                 result = subprocess.run(['/bin/sh', str(path), 'unhandled-action'], env=dict(os.environ, DPKG_ROOT=''),
                                         capture_output=True, text=True, timeout=5)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class MaintainerScriptTests(unittest.TestCase):
+    launchctl_paths = ('/var/jb/bin/launchctl', '/var/jb/usr/bin/launchctl', '/bin/launchctl')
+    label = 'system/com.kainograze.iPresence-Daemon'
+    plist = '/var/jb/Library/LaunchDaemons/com.kainograze.iPresence-Daemon.plist'
+    app = '/var/jb/Applications/iPresence.app'
+
+    def run_script(self, script, action, locations=None, bootout_status=0, bootstrap_status=0, uicache_status=0):
+        # Rewrite absolute paths in a temporary copy, never in the shipped
+        # scripts. Every possible launchctl and uicache invocation is a stub;
+        # the host's launchd and applications cannot be reached by this fixture.
+        if locations is None:
+            locations = {self.launchctl_paths[0]: 'file'}
+        with tempfile.TemporaryDirectory(prefix='ipresence-maintainer-') as temporary:
+            root = Path(temporary)
+            log = root / 'commands.log'
+            stub = '''#!/bin/sh
+printf '%s' "$0" >> "$IP_TEST_COMMAND_LOG"
+printf '\\t%s' "$@" >> "$IP_TEST_COMMAND_LOG"
+printf '\\n' >> "$IP_TEST_COMMAND_LOG"
+case "$1" in
+    bootout) exit "$IP_TEST_BOOTOUT_STATUS" ;;
+    bootstrap) exit "$IP_TEST_BOOTSTRAP_STATUS" ;;
+    -p|-u) exit "$IP_TEST_UICACHE_STATUS" ;;
+esac
+exit 99
+'''
+            commands = dict(locations, **{'/var/jb/usr/bin/uicache': 'file'})
+            for absolute, kind in commands.items():
+                path = root / absolute.lstrip('/')
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if kind == 'directory':
+                    path.mkdir()
+                elif kind == 'symlink':
+                    path.symlink_to(root / 'var/jb/usr/bin/launchctl')
+                else:
+                    path.write_text(stub)
+                    path.chmod(0o755 if kind == 'file' else 0o644)
+            original = (ROOT / 'packaging' / script).read_text()
+            isolated = re.sub(r'/var/jb(?:/[A-Za-z0-9._+-]+)*|/bin/launchctl',
+                              lambda match: str(root / match.group().lstrip('/')), original)
+            fixture = root / script
+            fixture.write_text(isolated)
+            environment = {'PATH': str(root / 'empty-path'), 'DPKG_ROOT': '',
+                           'IP_TEST_COMMAND_LOG': str(log), 'IP_TEST_BOOTOUT_STATUS': str(bootout_status),
+                           'IP_TEST_BOOTSTRAP_STATUS': str(bootstrap_status),
+                           'IP_TEST_UICACHE_STATUS': str(uicache_status)}
+            result = subprocess.run(['/bin/sh', str(fixture), action], env=environment,
+                                    capture_output=True, text=True, timeout=5)
+            calls = [[part.removeprefix(str(root)) for part in line.split('\t')]
+                     for line in log.read_text().splitlines()] if log.exists() else []
+            return result, calls
+
+    def test_launchctl_selection_prefers_rootless_and_checks_executability(self):
+        choices = [
+            ({path: 'file' for path in self.launchctl_paths}, self.launchctl_paths[0]),
+            ({path: 'file' for path in self.launchctl_paths[1:]}, self.launchctl_paths[1]),
+            ({self.launchctl_paths[2]: 'file'}, self.launchctl_paths[2]),
+            ({self.launchctl_paths[0]: 'nonexecutable', self.launchctl_paths[1]: 'file'}, self.launchctl_paths[1]),
+            ({self.launchctl_paths[0]: 'directory', self.launchctl_paths[1]: 'file'}, self.launchctl_paths[1]),
+            ({self.launchctl_paths[0]: 'symlink', self.launchctl_paths[1]: 'file'}, self.launchctl_paths[0]),
+        ]
+        for script, action in (('postinst', 'configure'), ('prerm', 'remove')):
+            for locations, expected in choices:
+                with self.subTest(script=script, locations=locations):
+                    result, calls = self.run_script(script, action, locations)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    launch_calls = [call for call in calls if call[0].endswith('/launchctl')]
+                    self.assertTrue(launch_calls)
+                    self.assertTrue(all(call[0] == expected for call in launch_calls), calls)
+
+    def test_configure_bootstraps_correct_job_after_optional_unload(self):
+        result, calls = self.run_script('postinst', 'configure', bootout_status=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [
+            ['/var/jb/usr/bin/uicache', '-p', self.app],
+            [self.launchctl_paths[0], 'bootout', self.label],
+            [self.launchctl_paths[0], 'bootstrap', 'system', self.plist],
+        ])
+        self.assertIn('iPresence installed.', result.stdout)
+
+    def test_configure_preserves_bootstrap_failure_and_never_prints_success(self):
+        result, calls = self.run_script('postinst', 'configure', bootstrap_status=42)
+        self.assertEqual(result.returncode, 42)
+        self.assertEqual(calls[-1], [self.launchctl_paths[0], 'bootstrap', 'system', self.plist])
+        self.assertIn('bootstrap failed (status 42)', result.stderr)
+        self.assertNotIn('iPresence installed.', result.stdout)
+
+    def test_configure_without_launchctl_fails_before_changing_registration(self):
+        result, calls = self.run_script('postinst', 'configure', {})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('launchctl was not found', result.stderr)
+        self.assertEqual(calls, [])
+        self.assertNotIn('iPresence installed.', result.stdout)
+
+    def test_icon_registration_failure_prevents_daemon_start(self):
+        result, calls = self.run_script('postinst', 'configure', uicache_status=23)
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(calls, [['/var/jb/usr/bin/uicache', '-p', self.app]])
+        self.assertNotIn('iPresence installed.', result.stdout)
+
+    def test_removal_unloads_and_unregisters_only_on_remove(self):
+        for action in ('remove', 'upgrade', 'deconfigure'):
+            with self.subTest(action=action):
+                result, calls = self.run_script('prerm', action, bootout_status=3)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                expected = [[self.launchctl_paths[0], 'bootout', self.label]]
+                if action == 'remove':
+                    expected.append(['/var/jb/usr/bin/uicache', '-u', self.app])
+                self.assertEqual(calls, expected)
+
+    def test_missing_launchctl_warns_without_trapping_package_removal(self):
+        for action in ('remove', 'upgrade', 'deconfigure'):
+            with self.subTest(action=action):
+                result, calls = self.run_script('prerm', action, {})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('daemon could not be unloaded', result.stderr)
+                self.assertEqual(calls, [['/var/jb/usr/bin/uicache', '-u', self.app]] if action == 'remove' else [])
 
 
 if __name__ == '__main__':

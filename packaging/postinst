@@ -5,9 +5,27 @@ set -eu
 [ -z "${DPKG_ROOT:-}" ] || exit 0
 case "${1:-}" in
     configure)
+        # Rootless bootstraps provide launchctl under /var/jb, not /bin.
+        ipresence_launchctl=
+        for ipresence_candidate in /var/jb/bin/launchctl /var/jb/usr/bin/launchctl /bin/launchctl; do
+            if [ -f "$ipresence_candidate" ] && [ -x "$ipresence_candidate" ]; then
+                ipresence_launchctl=$ipresence_candidate
+                break
+            fi
+        done
+        if [ -z "$ipresence_launchctl" ]; then
+            echo "iPresence: launchctl was not found. Repair the jailbreak bootstrap, then retry installation." >&2
+            exit 1
+        fi
         /var/jb/usr/bin/uicache -p /var/jb/Applications/iPresence.app
-        /bin/launchctl bootout system/com.kainograze.iPresence-Daemon 2>/dev/null || true
-        /bin/launchctl bootstrap system /var/jb/Library/LaunchDaemons/com.kainograze.iPresence-Daemon.plist
-        echo "iPresence installed. Respring to load the SpringBoard media helper."
+        # The job may not be loaded yet on first installation.
+        "$ipresence_launchctl" bootout system/com.kainograze.iPresence-Daemon 2>/dev/null || true
+        if "$ipresence_launchctl" bootstrap system /var/jb/Library/LaunchDaemons/com.kainograze.iPresence-Daemon.plist; then
+            echo "iPresence installed. Respring to load the SpringBoard media helper."
+        else
+            ipresence_status=$?
+            echo "iPresence: launchctl bootstrap failed (status $ipresence_status). Installation is not configured." >&2
+            exit "$ipresence_status"
+        fi
         ;;
 esac

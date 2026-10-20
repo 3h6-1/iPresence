@@ -4,7 +4,19 @@ set -eu
 [ -z "${DPKG_ROOT:-}" ] || exit 0
 case "${1:-}" in
     remove|upgrade|deconfigure)
-        /bin/launchctl bootout system/com.kainograze.iPresence-Daemon 2>/dev/null || true
+        ipresence_launchctl=
+        for ipresence_candidate in /var/jb/bin/launchctl /var/jb/usr/bin/launchctl /bin/launchctl; do
+            if [ -f "$ipresence_candidate" ] && [ -x "$ipresence_candidate" ]; then
+                ipresence_launchctl=$ipresence_candidate
+                break
+            fi
+        done
+        if [ -n "$ipresence_launchctl" ]; then
+            # An already unloaded job must not block removal or an upgrade.
+            "$ipresence_launchctl" bootout system/com.kainograze.iPresence-Daemon 2>/dev/null || true
+        else
+            echo "iPresence: launchctl was not found; the daemon could not be unloaded and may remain running until reboot." >&2
+        fi
         if [ "${1:-}" = remove ]; then
             /var/jb/usr/bin/uicache -u /var/jb/Applications/iPresence.app
         fi

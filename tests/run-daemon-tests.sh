@@ -1,4 +1,5 @@
 #!/bin/bash
+# Original project by kainograze. Updated by 3h6_1.
 set -euo pipefail
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 build_dir="$(mktemp -d "${TMPDIR:-/tmp}/ipresence-daemon-tests.XXXXXX")"

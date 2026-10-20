@@ -1,4 +1,10 @@
-# iPresence — rootless port
+<p align="center">
+  <img src="assets/ipresence-icon.png" width="128px" height="128px">
+</p>
+<h1 align="center">iPresence — rootless port</h1>
+
+Original project by [kainograze](https://github.com/kainograze/iPresence).
+Rootless port and updates by [3h6_1](https://github.com/3h6-1). See [AUTHORS](AUTHORS).
 
 iPresence shares the iPhone's current listening activity with Discord. This fork
 updates the original 32-bit project for arm64 and arm64e rootless jailbreaks.
@@ -20,9 +26,9 @@ improvement. RootHide's different package format is not supported.
 | Settings app and daemon | arm64, runs on both device families | iOS 15.1 |
 | Debian package | `iphoneos-arm64` | firmware 15.1 through 26.0.1 |
 
-The user confirmed the earlier personal-token build publishes activity on their
-phone. **The new OAuth build still needs end-to-end device validation**, including
-sign-in, token refresh, lock-screen playback, and daemon connectivity. Discord
+**Native Discord sign-in is confirmed on an iPhone 13 Pro Max running iOS 16.0
+with Dopamine** (version 2.1.2). Full end-to-end device validation is still needed,
+including token refresh, lock-screen playback, and daemon connectivity. Discord
 documents native iOS apps, not jailbreak launch daemons. Compiling against its
 SDK does not establish support for every OS/jailbreak combination, or guarantee
 that background authentication works on a physical device.
@@ -38,6 +44,10 @@ errors, forged/duplicate callbacks, native-opening failure, and retry after
 cancellation. These checks do not perform real Discord authentication, external
 app/browser handoff, or activity publication. The home-screen icon was also
 visually verified on the iOS 18.5 simulator using the release icon staging code.
+The diagnostics viewer passes 25 additional simulator checks covering report
+presentation, private copy options, repeated taps, document-picker construction,
+and snapshot lifetime. Copy writes and Files presentation are intercepted in the
+fixture; actual Files export still needs device validation.
 
 The package does not provide a jailbreak. Check the actual device and OS support
 of [Dopamine](https://github.com/opa334/Dopamine) or
@@ -62,7 +72,7 @@ make test
 make package
 ```
 
-Output: `packages/com.kainograze.ipresence_2.1.2~oauth3_iphoneos-arm64.deb`.
+Output: `packages/com.kainograze.ipresence_2.1.3~oauth4_iphoneos-arm64.deb`.
 The SDK runtime is signed and installed at
 `/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the daemon uses
 that rootless framework search path. The foreground app uses
@@ -82,6 +92,10 @@ from `xcrun simctl list devices available`, then run
 separate test app with synthetic credentials and removes it afterward. It only
 shuts down the selected simulator if it booted it. Results and UI screenshots
 are saved under `build/auth-routing/`.
+
+`bash tests/run-diagnostics-viewer-simulator-tests.sh <simulator-UDID>` exercises
+the report viewer, copy options, document export configuration, and snapshot
+cleanup with synthetic reports. It does not change the real device clipboard.
 
 `ci/build.yml` is an inactive host-test workflow template. It needs a credential
 with workflow-write permission to install under `.github/workflows/`. Package
@@ -156,24 +170,34 @@ storage: software with mobile/root privileges on a jailbroken device can read it
 ## Sign-in diagnostics
 
 If authorization fails or shows a blank page, return to iPresence, cancel any
-pending sign-in, and select **Share diagnostics**. The file contains recent sign-in
+pending sign-in, and select **View diagnostics**. The report contains recent sign-in
 stages, error domains/codes, HTTP statuses, app/OS versions, and the hardware model
 identifier. It excludes authorization URLs, codes, state, PKCE verifiers, tokens,
-usernames, HTTP bodies, and error descriptions. Sharing happens only through the
-destination you choose in the iOS share sheet.
+usernames, HTTP bodies, and error descriptions. Review it in the app, then choose
+**Copy report** to paste it manually or **Save to Files** to export a copy and attach
+it. Copying uses a local-only clipboard item that expires after ten minutes.
+Nothing is sent automatically.
+
+Version 2.1.3 replaces the iOS share sheet: a supplied iOS 16.0 crash report showed
+a null-pointer crash in CoreImage/MobileIcons while the sheet fetched an AirDrop
+activity icon, with SnowBoard in that call stack. The report viewer avoids that
+activity/icon-discovery path entirely. The log does not establish the sole cause
+of the crash or explain the blank browser page.
 
 Sanitized events also appear in Console under subsystem `com.kainograze.iPresence`,
 category `diagnostics`. On-device files live in
 `/var/mobile/Library/Preferences/iPresenceDiagnostics/`: `current.jsonl` and
 `previous.jsonl`, each limited to 64 KiB with mode 0600 in a mode-0700 directory.
-The exported snapshot is revalidated and removed after the share sheet finishes.
+The exported snapshot is revalidated and kept while the viewer is open, then
+removed when the viewer closes. A copy explicitly saved to Files remains there.
 
 The browser-only 2.1.1 build showed a blank Discord page on the test device
 (iOS 16.0, Dopamine, Discord installed and signed in). The same authorization URL
 rendered in the desktop browser; the cause inside the phone's web session is not
 confirmed. Native-first authorization avoids that web path. A fresh browser
 session may help with stale website state but cannot repair a Discord/WebKit
-compatibility problem. Real-device confirmation of the native flow is still needed.
+compatibility problem. The user has confirmed native sign-in works; browser-only
+sign-in remains under investigation pending a report from the affected device.
 
 ## Activity artwork
 
@@ -221,7 +245,8 @@ stale playback after 120 seconds (plus its next poll), coalesces updates, clears
 paused activity, and disconnects after five idle minutes. SDK timestamps are
 converted from the helper's milliseconds to Unix seconds.
 
-Original project by [kainograze](https://github.com/kainograze/iPresence).
+Authors: [kainograze](https://github.com/kainograze/iPresence) and
+[3h6_1](https://github.com/3h6-1); see [AUTHORS](AUTHORS) for contribution credits.
 The original GPL-2.0 license is retained; see [LICENSE](LICENSE). Discord's SDK
 is separately licensed under its own terms, is not covered by this repository's
 GPL license, and is not committed here. Local SDK-linked packages are for the

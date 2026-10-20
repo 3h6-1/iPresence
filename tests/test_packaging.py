@@ -1,3 +1,4 @@
+# Original project by kainograze. Updated by 3h6_1.
 """Regression checks for package safety and compatibility boundaries; no device needed."""
 import importlib.util
 import os

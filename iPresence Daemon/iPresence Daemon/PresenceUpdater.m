@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import "PresenceUpdater.h"
 #import "UserPreferences.h"
 #import <math.h>

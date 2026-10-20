@@ -14,12 +14,14 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>iPresence</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Original project by kainograze. Rootless port and updates by 3h6_1.</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.1.2</string>
+	<string>2.1.3</string>
 	<key>CFBundleVersion</key>
-	<string>6</string>
+	<string>7</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>

@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import "IPDiscordAuthorization.h"
 #import "../../shared/IPOAuthStore.h"
 #import "../../shared/IPAuthorizationAttempt.h"

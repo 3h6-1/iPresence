@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 // Host-side transformation regression tests; no device/private frameworks needed.
 // The injected library constructor is a no-op outside SpringBoard.
 #import "../iPresence Springboard Helper/iPresence_Springboard_Helper.m"

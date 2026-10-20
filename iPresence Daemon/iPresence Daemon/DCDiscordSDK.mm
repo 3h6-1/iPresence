@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import "DCDiscordSDK.h"
 #define DISCORDPP_IMPLEMENTATION
 #include "discordpp.h"

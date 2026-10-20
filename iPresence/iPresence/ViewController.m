@@ -1,5 +1,7 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import "ViewController.h"
 #import "IPDiscordAuthorization.h"
+#import "IPDiagnosticsViewController.h"
 #import "../../shared/IPOAuthStore.h"
 #import "../../shared/IPDiagnostics.h"
 #import <CoreFoundation/CoreFoundation.h>
@@ -71,10 +73,12 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     self.statusLabel = [self label:@"Sign in, then enable activity sharing when you’re ready." style:UIFontTextStyleFootnote];
     self.statusLabel.textColor = UIColor.secondaryLabelColor;
     self.shareDiagnosticsButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.shareDiagnosticsButton setTitle:@"Share diagnostics" forState:UIControlStateNormal];
+    [self.shareDiagnosticsButton setTitle:@"View diagnostics" forState:UIControlStateNormal];
     [self.shareDiagnosticsButton addTarget:self action:@selector(shareDiagnostics) forControlEvents:UIControlEventTouchUpInside];
-    UILabel *diagnosticsNotice = [self label:@"Includes recent technical events and app/device versions. Authorization credentials are not recorded. Choose where to share the file." style:UIFontTextStyleFootnote];
+    UILabel *diagnosticsNotice = [self label:@"Includes recent technical events and app/device versions. Authorization credentials are not recorded. Review, copy, or save a report to send manually." style:UIFontTextStyleFootnote];
     diagnosticsNotice.textColor = UIColor.secondaryLabelColor;
+    UILabel *authors = [self label:@"Authors: kainograze · 3h6_1" style:UIFontTextStyleFootnote];
+    authors.textColor = UIColor.secondaryLabelColor;
     UILabel *description = [self label:@"Share your music activity with Discord." style:UIFontTextStyleTitle2];
     UILabel *notice = [self label:@"Discord’s minimum presence permission bundle also includes friend and relationship access. iPresence uses it to publish listening activity and does not use friend features. It does not request message, voice, email, or server access. Review Discord’s permissions before approving; you can cancel or revoke access at any time." style:UIFontTextStyleFootnote];
     notice.textColor = UIColor.secondaryLabelColor;
@@ -82,7 +86,7 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
         description, self.accountLabel, notice, self.signInButton, self.browserSignInButton, self.cancelSignInButton, self.signOutButton,
         [self row:@"Share listening activity" toggle:self.enabledSwitch],
         [self row:@"Show iOS version" toggle:self.versionSwitch], self.statusLabel,
-        self.shareDiagnosticsButton, diagnosticsNotice
+        self.shareDiagnosticsButton, diagnosticsNotice, authors
     ]];
     stack.axis = UILayoutConstraintAxisVertical;
     stack.spacing = 24;
@@ -210,18 +214,21 @@ static NSString * const IPPreferencesPath = @"/var/mobile/Library/Preferences/co
     [IPDiscordAuthorization.sharedInstance cancelSignIn];
 }
 - (void)shareDiagnostics {
+    if (self.presentedViewController) return;
     NSError *error = nil;
     NSURL *snapshot = [IPDiagnostics exportSnapshotWithError:&error];
     if (!snapshot) {
         self.statusLabel.text = error.localizedDescription ?: @"Could not prepare private diagnostics. Please try again.";
         return;
     }
-    UIActivityViewController *activity = [[UIActivityViewController alloc] initWithActivityItems:@[snapshot] applicationActivities:nil];
-    activity.popoverPresentationController.sourceView = self.shareDiagnosticsButton;
-    activity.popoverPresentationController.sourceRect = self.shareDiagnosticsButton.bounds;
-    activity.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *items, NSError *activityError) {
+    IPDiagnosticsViewController *viewer = [[IPDiagnosticsViewController alloc] initWithSnapshotURL:snapshot];
+    if (!viewer) {
         [IPDiagnostics removeExportSnapshot:snapshot];
-    };
-    [self presentViewController:activity animated:YES completion:nil];
+        self.statusLabel.text = @"Could not open the diagnostic report. Please try again.";
+        return;
+    }
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:viewer];
+    navigation.modalPresentationStyle = UIModalPresentationFullScreen;
+    [self presentViewController:navigation animated:YES completion:nil];
 }
 @end

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Original project by kainograze. Updated by 3h6_1.
 """Inspect the built .deb without installing it or executing its payload."""
 import argparse
 import io

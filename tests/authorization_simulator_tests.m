@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 // Offline integration fixture. This file is never linked into packaged builds.
 // Native handoff, web sessions, and all HTTP transport are replaced; no Discord traffic.
 #import <UIKit/UIKit.h>

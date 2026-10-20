@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
 

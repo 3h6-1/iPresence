@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import "IPOAuthStore.h"
 #import <CoreFoundation/CoreFoundation.h>
 #include <errno.h>

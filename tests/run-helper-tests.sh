@@ -1,4 +1,5 @@
 #!/bin/bash
+# Original project by kainograze. Updated by 3h6_1.
 set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$repo_root/build/tests"

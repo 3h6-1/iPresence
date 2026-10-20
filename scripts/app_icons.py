@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Original project by kainograze. Updated by 3h6_1.
 """Stage and verify loose PNG app icons without Xcode or an asset catalog."""
 from pathlib import Path
 import plistlib

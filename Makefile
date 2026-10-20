@@ -1,3 +1,4 @@
+# Original project by kainograze. Updated by 3h6_1.
 .PHONY: all build package test verify clean
 all: package
 build:

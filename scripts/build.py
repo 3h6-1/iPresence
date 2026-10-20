@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Original project by kainograze. Updated by 3h6_1.
 """Build with Apple's modern arm64e ABI and stage a standard /var/jb package."""
 import argparse
 from pathlib import Path
@@ -78,6 +79,7 @@ def main():
     license_directory = PREFIX / 'usr/share/doc/com.kainograze.ipresence'
     license_directory.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / 'LICENSE', license_directory / 'copyright')
+    shutil.copy2(ROOT / 'AUTHORS', license_directory / 'AUTHORS')
     run('ldid', '-S' + str(ROOT / 'packaging/app.entitlements.plist'), app / 'iPresence')
     run('ldid', '-S' + str(ROOT / 'packaging/daemon.entitlements.plist'), daemon)
     shutil.copy2(ROOT / 'vendor/discord_social_sdk/License-Notices.txt', license_directory / 'Discord-SDK-Notices.txt')

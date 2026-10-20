@@ -1,0 +1,21 @@
+iPresence authors
+
+kainograze
+  Original iPresence project.
+  https://github.com/kainograze/iPresence
+
+3h6_1
+  arm64/arm64e rootless port, Discord OAuth and Social SDK integration,
+  app and daemon updates, diagnostics, artwork integration, build tooling,
+  regression tests, and maintenance of this fork (2026-10-19 onward).
+  https://github.com/3h6-1
+
+These credits cover the maintained project and the changes in this fork.
+Original author/copyright notices, the GPL-2.0 LICENSE, and third-party notices
+remain intact. Discord's SDK and Apple's artwork retain their separate credits
+and terms. Generated icon provenance and its original generation prompt remain
+documented in assets/README.md and assets/ipresence-icon-prompt.txt.
+
+Binary artwork and formats without an appropriate author/comment field use
+this central AUTHORS file and assets/README.md for attribution. Unmodified
+upstream files retain their existing credits.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Original project by kainograze. Updated by 3h6_1.
 # Optional integration tests: requires Xcode and an already installed iOS runtime.
 # Usage: tests/run-authorization-simulator-tests.sh <simulator-UDID>
 # Only the selected simulator is touched; no OAuth/network/real credential access.
@@ -47,7 +48,8 @@ xcrun --sdk iphonesimulator clang -target "$architecture-apple-ios15.1-simulator
   -DIPOAUTH_STORE_TESTING -DIPDISCORD_OAUTH_REQUEST_TESTING -DIPDIAGNOSTICS_TESTING -IiPresence/iPresence -Ishared \
   -framework Foundation -framework CoreFoundation -framework UIKit -framework AuthenticationServices -framework Security \
   iPresence/iPresence/main.m iPresence/iPresence/AppDelegate.m iPresence/iPresence/ViewController.m \
-  iPresence/iPresence/IPDiscordAuthorization.m shared/IPOAuthStore.m shared/IPAuthorizationAttempt.m \
+  iPresence/iPresence/IPDiscordAuthorization.m iPresence/iPresence/IPDiagnosticsViewController.m \
+  shared/IPOAuthStore.m shared/IPAuthorizationAttempt.m \
   shared/IPDiscordOAuthRequest.m shared/IPDiagnostics.m tests/authorization_simulator_tests.m -o "$app/iPresence"
 codesign --force --sign - "$app"
 xcrun simctl install "$simulator_id" "$app"

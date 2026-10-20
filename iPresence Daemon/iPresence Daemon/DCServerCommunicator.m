@@ -1,3 +1,4 @@
+// Original project by kainograze. Updated by 3h6_1.
 #import "DCServerCommunicator.h"
 #import "IPOAuthStore.h"
 #import "UserPreferences.h"

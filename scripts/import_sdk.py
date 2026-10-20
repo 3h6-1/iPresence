@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Original project by kainograze. Updated by 3h6_1.
 """Import the official Social SDK ZIP downloaded from Discord's Developer Portal."""
 import argparse
 from pathlib import Path, PurePosixPath

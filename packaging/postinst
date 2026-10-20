@@ -1,4 +1,5 @@
 #!/var/jb/bin/sh
+# Original project by kainograze. Updated by 3h6_1.
 set -eu
 # An offline package extraction must not touch the build host's launchd.
 [ -z "${DPKG_ROOT:-}" ] || exit 0

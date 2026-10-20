@@ -273,11 +273,3 @@ The original GPL-2.0 license is retained; see [LICENSE](LICENSE). Discord's SDK
 is separately licensed under its own terms, is not covered by this repository's
 GPL license, and is not committed here. Local SDK-linked packages are for the
 SDK license holder's testing; no combined binary release is published here.
-
-A release-configured build does not resolve this licensing question. Discord's
-[SDK terms](https://support-dev.discord.com/hc/en-us/articles/30225844245271-Discord-Social-SDK-Terms)
-permit distribution integrated into an application subject to their conditions,
-but the inherited GPL-2.0 code also has distribution requirements. Before publicly
-distributing the linked binary, resolve compatibility or obtain an appropriate
-linking exception from the relevant copyright holders; see the
-[GNU guidance on incompatible libraries](https://www.gnu.org/licenses/gpl-faq.en.html#GPLIncompatibleLibs).

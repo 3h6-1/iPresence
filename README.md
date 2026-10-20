@@ -74,7 +74,13 @@ make test
 make package
 ```
 
-Output: `packages/com.kainograze.ipresence_2.1.4~oauth5_iphoneos-arm64.deb`.
+Output: `packages/com.kainograze.ipresence_2.1.4_iphoneos-arm64.deb`.
+
+`make package` builds the optimized device package (`-O2`) using Discord's release
+SDK. There is no separate development build mode or Theos `FINALPACKAGE` flag.
+Tests and simulator fixtures are not included. The stable Debian version `2.1.4`
+upgrades from `2.1.4~oauth5`; app build 9 identifies this packaging revision.
+The opt-in diagnostic report remains available in the optimized build.
 The SDK runtime is signed and installed at
 `/var/jb/Library/Frameworks/discord_partner_sdk.framework`; the daemon uses
 that rootless framework search path. The foreground app uses
@@ -268,3 +274,11 @@ The original GPL-2.0 license is retained; see [LICENSE](LICENSE). Discord's SDK
 is separately licensed under its own terms, is not covered by this repository's
 GPL license, and is not committed here. Local SDK-linked packages are for the
 SDK license holder's testing; no combined binary release is published here.
+
+A release-configured build does not resolve this licensing question. Discord's
+[SDK terms](https://support-dev.discord.com/hc/en-us/articles/30225844245271-Discord-Social-SDK-Terms)
+permit distribution integrated into an application subject to their conditions,
+but the inherited GPL-2.0 code also has distribution requirements. Before publicly
+distributing the linked binary, resolve compatibility or obtain an appropriate
+linking exception from the relevant copyright holders; see the
+[GNU guidance on incompatible libraries](https://www.gnu.org/licenses/gpl-faq.en.html#GPLIncompatibleLibs).

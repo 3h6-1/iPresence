@@ -1,4 +1,5 @@
 // Original project by kainograze. Updated by 3h6_1.
+//  Copyright (c) 2026 kainograze. All rights reserved.
 #import "Bootstrap.h"
 
 @implementation Bootstrap

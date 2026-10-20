@@ -10,6 +10,22 @@ kainograze
   regression tests, and maintenance of this fork (2026-10-19 onward).
   https://github.com/3h6-1
 
+Recorded upstream copyright notices
+  Copyright (c) 2018 kainograze. All rights reserved.
+    DCServerCommunicator.h and DCServerCommunicator.m.
+  Copyright (c) 2026 kainograze. All rights reserved.
+    The other app and daemon source files carrying upstream notices.
+
+Historical third-party source (not compiled by the current build)
+  Websocket/: Copyright (c) 2012 Andras Koczka; MIT permission notices.
+  Websocket/NSString+Base64.m additionally records:
+    Copyright (c) 2010 - 2011, Quasidea Development, LLC; MIT notice.
+    Copyright (c) 1997-2010 The PHP Group; PHP License 3.01 notice.
+    Jim Winstead is credited as the author of the PHP-derived functions.
+
+These are recorded credits and notices, not evidence of exclusive ownership,
+a copyright assignment, or permission to relicense or add a linking exception.
+
 These credits cover the maintained project and the changes in this fork.
 Original author/copyright notices, the GPL-2.0 LICENSE, and third-party notices
 remain intact. Discord's SDK and Apple's artwork retain their separate credits

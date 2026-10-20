@@ -1,4 +1,5 @@
 // Original project by kainograze. Updated by 3h6_1.
+//  Copyright (c) 2018 kainograze. All rights reserved.
 #import "DCServerCommunicator.h"
 #import "IPOAuthStore.h"
 #import "UserPreferences.h"

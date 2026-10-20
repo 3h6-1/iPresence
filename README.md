@@ -199,8 +199,7 @@ Version 2.1.3 replaces the iOS share sheet: a supplied iOS 16.0 crash report sho
 a null-pointer crash in CoreImage/MobileIcons while the sheet fetched an AirDrop
 activity icon, with SnowBoard in that call stack. The report viewer avoids that
 activity/icon-discovery path entirely. The log does not establish the sole cause
-of the crash or explain the blank browser page. The user confirmed the replacement
-diagnostics viewer works on the affected device.
+of the crash or explain the blank browser page.
 
 Sanitized events also appear in Console under subsystem `com.kainograze.iPresence`,
 category `diagnostics`. On-device files live in

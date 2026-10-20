@@ -4,7 +4,6 @@ Version: 2.1.4
 Architecture: iphoneos-arm64
 Description: Music presence for Discord on rootless iOS 15.1-26.0.1
  Includes the settings app, background daemon and SpringBoard media helper.
- Device validation is required for each supported jailbreak and OS combination.
 Maintainer: 3h6_1 <umarov.m@northeastern.edu>
 Author: kainograze, 3h6_1
 Section: Tweaks

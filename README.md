@@ -15,7 +15,6 @@ Discord account/session token. It works entirely on the iPhone.
 ## Build
    
 ```sh
-python3 scripts/import_sdk.py ~/Downloads/DiscordSocialSdk-1.10.19337.zip
 brew install ldid dpkg
 make test
 make package

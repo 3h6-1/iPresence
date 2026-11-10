@@ -3,6 +3,8 @@
 </p>
 <h1 align="center">iPresence — rootless port</h1>
 
+[<img width="150" src="https://docs.havoc.app/img/badges/get_square.svg">](https://havoc.app/package/ipresence)
+
 Original project by [kainograze](https://github.com/kainograze/iPresence).
 Rootless port and updates by [3h6_1](https://github.com/3h6-1). See [AUTHORS](AUTHORS).
 
